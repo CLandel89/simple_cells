@@ -1,4 +1,4 @@
-const CHUNK_W: usize = 64;
+const CHUNK_W: usize = 8;
 
 /*
 A "chunk" is a CHUNK_W × CHUNK_W piece of the field.
@@ -26,12 +26,15 @@ impl Chunk {
         d &= !clear; //clears the bit if v was not set
         self.data[di] = d;
     }
-    // Sets a 2×2 piece of the chunk, assuming x%2==0 and y%2==0.
-    pub fn set4 (&mut self, x:usize, y:usize, v:u8) {
-        self.set(x,y, v&0b0001 != 0);
-        self.set(x+1,y, v&0b0010 != 0);
-        self.set(x,y+1, v&0b0100 != 0);
-        self.set(x+1,y+1, v&0b1000 != 0);
+    // Sets a 2×1 piece of the chunk, assuming x%2==0 and y%2==0, and v&(!3) == 0.
+    pub fn set2 (&mut self, x:usize, y:usize, v:u8) {
+        let v8 = v << (x%8);
+        let di = y * CHUNK_W / 8 + x / 8;
+        let mut d = self.data[di];
+        let clear = (3 << (x%8)) ^ v8;
+        d |= v8;
+        d &= !clear;
+        self.data[di] = d;
     }
 }
 
@@ -57,21 +60,21 @@ impl Field {
 }
 
 /*
-The "table" is the storage for all 2×2 results of 4×4 field slices.
-There are 2^(4×­4)=65536 4-bit lookup values. A u8 can hold 2 such values.
+The "table" is the storage for all 2×1 results of 4×3 field slices.
+There are 2^(4×­3)=4096 2-bit lookup values. A u8 can hold 4 such values.
 TODO: Document how and why.
 */
 pub struct Table {
-    values: [u8; 65536/2],
+    values: [u8; 4096/4],
 }
 impl Table {
     pub fn new (borns: u16, survives: u16) -> Table {
         let mut table = Table {
-            values: [0; 65536/2],
+            values: [0; 4096/4],
         };
-        for env in 0..=65535 {
+        for env in 0..4096 {
             let mut value = 0u8;
-            //the counting in this closure needs to be done for all 4 result bits
+            //the counting in this closure needs to be done for both result bits
             let check_accountable_bits = |accountable_bits: [usize; 8], mid: usize| {
                 let mut count = 0;
                 for accountable_bit in &accountable_bits {
@@ -94,43 +97,34 @@ impl Table {
             //  0  1  2  3
             //  4  5  6  7
             //  8  9 10 11
-            // 12 13 14 15
-            //upper left result bit
+            //left result bit
             if check_accountable_bits([0,1,2, 4,6, 8,9,10], 5) {
                 value |= 1 << 0;
             }
-            //upper right result bit
+            //right result bit
             if check_accountable_bits([1,2,3, 5,7, 9,10,11], 6) {
                 value |= 1 << 1;
             }
-            //lower left result bit
-            if check_accountable_bits([4,5,6, 8,10, 12,13,14], 9) {
-                value |= 1 << 2;
-            }
-            //lower right result bit
-            if check_accountable_bits([5,6,7, 9,11, 13,14,15], 10) {
-                value |= 1 << 3;
-            }
-            //0 to 4 bits are set in "value", now store
+            //0 to 2 bits are set in "value", now store
             table.set(env, value);
         }
         table
     }
     pub fn get (&self, env: u16) -> u8 {
         //get the u8 with the entry and 1 other entry
-        let d = self.values[env as usize / 2];
-        //shift the entry to the LSB and clear any MSB past 4 bits
-        ((d >> ((env%2)*4)) & 0xf)
+        let d = self.values[env as usize / 4];
+        //shift the entry to the LSB and clear any MSB past 2 bits
+        ((d >> ((env%4)*2)) & 3)
     }
     pub fn set (&mut self, env: u16, value: u8) {
         //get the u8 with the entry and 1 other entry
-        let mut d = self.values[env as usize / 2];
+        let mut d = self.values[env as usize / 4];
         //clear the 4 bits of the entry
-        d &= !(0xf << ((env%2)*4));
+        d &= !(3 << ((env%4)*2));
         //set the entry
-        d |= (value as u8) << ((env%2)*4);
+        d |= (value as u8) << ((env%4)*2);
         //store
-        self.values[env as usize / 2] = d;
+        self.values[env as usize / 4] = d;
     }
 }
 
@@ -150,9 +144,9 @@ impl<'a> Worker<'a> {
         let target = &mut self.target;
         let table = &self.table;
         let mut src: u16;
-        let collect_src = |bits: [(usize,usize,usize); 16]| {
+        let collect_src = |bits: [(usize,usize,usize); 12]| {
             let mut src = 0u16;
-            for i in 0..16 {
+            for i in 0..12 {
                 let env_i = bits[i].0;
                 let x = bits[i].1;
                 let y = bits[i].2;
@@ -169,85 +163,76 @@ impl<'a> Worker<'a> {
             (TL,CW1,CW1), (TM,0,CW1), (TM,1,CW1), (TM,2,CW1),
             (ML,CW1,0), (MM,0,0), (MM,1,0), (MM,2,0),
             (ML,CW1,1), (MM,0,1), (MM,1,1), (MM,2,1),
-            (ML,CW1,2), (MM,0,2), (MM,1,2), (MM,2,2)
         ]);
-        target.set4(0,0, table.get(src));
+        target.set2(0,0, table.get(src));
         // top stripe
         for x in (2..CW2).step_by(2) {
             src = collect_src([
                 (TM,x-1,CW1), (TM,x,CW1), (TM,x+1,CW1), (TM,x+2,CW1),
                 (MM,x-1,0), (MM,x,0), (MM,x+1,0), (MM,x+2,0),
                 (MM,x-1,1), (MM,x,1), (MM,x+1,1), (MM,x+2,1),
-                (MM,x-1,2), (MM,x,2), (MM,x+1,2), (MM,x+2,2)
             ]);
-            target.set4(x,0, table.get(src));
+            target.set2(x,0, table.get(src));
         }
         // top right corner
         src = collect_src([
             (TM,CW3,CW1), (TM,CW2,CW1), (TM,CW1,CW1), (TR,0,CW1),
             (MM,CW3,0), (MM,CW2,0), (MM,CW1,0), (MR,0,0),
             (MM,CW3,1), (MM,CW2,1), (MM,CW1,1), (MR,0,1),
-            (MM,CW3,2), (MM,CW2,2), (MM,CW1,2), (MR,0,2)
         ]);
-        target.set4(CW2,0, table.get(src));
+        target.set2(CW2,0, table.get(src));
         // left stripe
-        for y in (2..CW2).step_by(2) {
+        for y in 1..CW1 {
             src = collect_src([
                 (ML,CW1,y-1), (MM,0,y-1), (MM,1,y-1), (MM,2,y-1),
                 (ML,CW1,y), (MM,0,y), (MM,1,y), (MM,2,y),
                 (ML,CW1,y+1), (MM,0,y+1), (MM,1,y+1), (MM,2,y+1),
-                (ML,CW1,y+2), (MM,0,y+2), (MM,1,y+2), (MM,2,y+2)
             ]);
-            target.set4(0,y, table.get(src));
+            target.set2(0,y, table.get(src));
         }
         // mid block
-        for y in (2..CW2).step_by(2) {
+        for y in 1..CW1 {
             for x in (2..CW2).step_by(2) {
                 src = collect_src([
                     (MM,x-1,y-1), (MM,x,y-1), (MM,x+1,y-1), (MM,x+2,y-1),
                     (MM,x-1,y), (MM,x,y), (MM,x+1,y), (MM,x+2,y),
                     (MM,x-1,y+1), (MM,x,y+1), (MM,x+1,y+1), (MM,x+2,y+1),
-                    (MM,x-1,y+2), (MM,x,y+2), (MM,x+1,y+2), (MM,x+2,y+2)
                 ]);
-                target.set4(x,y, table.get(src));
+                target.set2(x,y, table.get(src));
             }
         }
         // right stripe
-        for y in (2..CW2).step_by(2) {
+        for y in 1..CW1 {
             src = collect_src([
                 (MM,CW3,y-1), (MM,CW2,y-1), (MM,CW1,y-1), (MR,0,y-1),
                 (MM,CW3,y), (MM,CW2,y), (MM,CW1,y), (MR,0,y),
                 (MM,CW3,y+1), (MM,CW2,y+1), (MM,CW1,y+1), (MR,0,y+1),
-                (MM,CW3,y+2), (MM,CW2,y+2), (MM,CW1,y+2), (MR,0,y+2)
             ]);
-            target.set4(CW2,y, table.get(src));
+            target.set2(CW2,y, table.get(src));
         }
         // bottom left corner
         src = collect_src([
-            (ML,CW1,CW3), (MM,0,CW3), (MM,1,CW3), (MM,2,CW3),
             (ML,CW1,CW2), (MM,0,CW2), (MM,1,CW2), (MM,2,CW2),
             (ML,CW1,CW1), (MM,0,CW1), (MM,1,CW1), (MM,2,CW1),
             (BL,CW1,0), (BM,0,0), (BM,1,0), (BM,2,0)
         ]);
-        target.set4(0,CW2, table.get(src));
+        target.set2(0,CW1, table.get(src));
         // bottom stripe
         for x in (2..CW2).step_by(2) {
             src = collect_src([
-                (MM,x-1,CW3), (MM,x,CW3), (MM,x+1,CW3), (MM,x+2,CW3),
                 (MM,x-1,CW2), (MM,x,CW2), (MM,x+1,CW2), (MM,x+2,CW2),
                 (MM,x-1,CW1), (MM,x,CW1), (MM,x+1,CW1), (MM,x+2,CW1),
                 (BM,x-1,0), (BM,x,0), (BM,x+1,0), (BM,x+2,0)
             ]);
-            target.set4(x,CW2, table.get(src));
+            target.set2(x,CW1, table.get(src));
         }
         // bottom right corner
         src = collect_src([
             (MM,CW3,CW3), (MM,CW2,CW3), (MM,CW1,CW3), (MR,0,CW3),
-            (MM,CW3,CW3), (MM,CW2,CW3), (MM,CW1,CW3), (MR,0,CW3),
             (MM,CW3,CW1), (MM,CW2,CW1), (MM,CW1,CW1), (MR,0,CW1),
             (BM,CW3,0), (BM,CW2,0), (BM,CW1,0), (BR,0,0)
         ]);
-        target.set4(CW2,CW2, table.get(src));
+        target.set2(CW2,CW1, table.get(src));
     }
 }
 
