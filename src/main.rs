@@ -36,8 +36,8 @@ fn main () {
     let mut f_counter = 0_usize;
     let mut r_counter = 0_isize;
     let /*const*/ SECOND: Duration = Duration::new(1, 0);
-    let fps = prefs_json["fps"].as_usize().unwrap();
-    let spf = 1_f64 / (fps as f64);
+    let fps = prefs_json["fps"].as_f64().unwrap();
+    let spf = 1_f64 / fps;
     loop {
         window.fill(0,0,0);
         window.set_draw_color(255,255,255);
@@ -65,7 +65,7 @@ fn main () {
             t_counter = Instant::now();
             let dur = (elapsed.as_millis() as f64) / 1000.0;
             let rps = (r_counter as f64) / dur;
-            let rpf_new = (rps / (fps as f64)) as isize;
+            let rpf_new = (rps / fps) as isize;
             rpf = (3*rpf + rpf_new) / 4;
             if rpf <= 0 {
                 rpf = 1;
