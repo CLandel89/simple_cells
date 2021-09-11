@@ -1,0 +1,6 @@
+{
+    "n_threads": 4,
+    "window_w": 512,
+    "window_h": 512,
+    "fps": 10
+}
