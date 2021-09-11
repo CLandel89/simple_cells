@@ -30,12 +30,14 @@ fn main () {
             }
         }
     }
-    let mut n = 0usize;
-    let mut rpf = 10isize; //playing rounds per frame
+    let mut n = 0_usize;
+    let mut rpf = 1_isize; //playing rounds per frame
     let mut t_counter = Instant::now();
-    let mut f_counter = 0usize;
+    let mut f_counter = 0_usize;
+    let mut r_counter = 0_isize;
     let /*const*/ SECOND: Duration = Duration::new(1, 0);
     let fps = prefs_json["fps"].as_usize().unwrap();
+    let spf = 1_f64 / (fps as f64);
     loop {
         window.fill(0,0,0);
         window.set_draw_color(255,255,255);
@@ -55,20 +57,21 @@ fn main () {
         }
         for _ in 0..rpf {
             automata.play();
-            n += 1;
         }
-        if t_counter.elapsed() >= SECOND {
-            t_counter += SECOND;
-            if f_counter < fps*9/10 {
-                rpf -= 1 + rpf/10;
-                if rpf <= 0 {
-                    rpf = 1;
-                }
-            }
-            if f_counter > fps*11/10 {
-                rpf += 1 + rpf/10;
+        n += rpf as usize;
+        r_counter += rpf;
+        let elapsed = t_counter.elapsed();
+        if f_counter == 16 || elapsed >= SECOND {
+            t_counter = Instant::now();
+            let dur = (elapsed.as_millis() as f64) / 1000.0;
+            let rps = (r_counter as f64) / dur;
+            let rpf_new = (rps / (fps as f64)) as isize;
+            rpf = (3*rpf + rpf_new) / 4;
+            if rpf <= 0 {
+                rpf = 1;
             }
             f_counter = 0;
+            r_counter = 0;
         }
     }
 }
