@@ -2,25 +2,25 @@
 A "chunk" is a 256×256 piece of the field.
 */
 pub struct Chunk {
-    data: [u16; 256*256/16],
+    data: [u8; 256*256/8],
 }
 impl Chunk {
     pub fn new () -> Chunk {
         Chunk {
-            data: [0; 256*256/16],
+            data: [0; 256*256/8],
         }
     }
     pub fn get (&self, x:u8, y:u8) -> bool {
-        let di = y as usize * 256 / 16 + x as usize / 16;
+        let di = y as usize * 256 / 8 + x as usize / 8;
         let d = self.data[di];
-        (d >> (x%16)) & 1 != 0
+        (d >> (x%8)) & 1 != 0
     }
     pub fn set (&mut self, x:u8, y:u8, v:bool) {
-        let di = y as usize * 256 / 16 + x as usize / 16;
+        let di = y as usize * 256 / 8 + x as usize / 8;
         let mut d = self.data[di];
-        let v16 = (v as u16) << (x%16);
-        let clear = (1 << (x%16)) ^ v16;
-        d |= v16; //sets the bit if v was set
+        let v8 = (v as u8) << (x%8);
+        let clear = (1 << (x%8)) ^ v8;
+        d |= v8; //sets the bit if v was set
         d &= !clear; //clears the bit if v was not set
         self.data[di] = d;
     }
@@ -56,16 +56,16 @@ impl Field {
 
 /*
 The "table" is the storage for all 2×2 results of 4×4 field slices.
-There are 2^(4×­4)=65536 4-bit lookup values. A u16 can hold 4 such values.
+There are 2^(4×­4)=65536 4-bit lookup values. A u8 can hold 2 such values.
 TODO: Document how and why.
 */
 pub struct Table {
-    values: [u16; 65536/4],
+    values: [u8; 65536/2],
 }
 impl Table {
     pub fn new (borns: u16, survives: u16) -> Table {
         let mut table = Table {
-            values: [0; 65536/4],
+            values: [0; 65536/2],
         };
         for env in 0..=65535 {
             let mut value = 0u8;
@@ -115,20 +115,20 @@ impl Table {
         table
     }
     pub fn get (&self, env: u16) -> u8 {
-        //get the u16 with the entry and 3 other entries
-        let d = self.values[env as usize / 4];
+        //get the u8 with the entry and 1 other entry
+        let d = self.values[env as usize / 2];
         //shift the entry to the LSB and clear any MSB past 4 bits
-        ((d >> ((env%4)*4)) & 0xf) as u8
+        ((d >> ((env%2)*4)) & 0xf)
     }
     pub fn set (&mut self, env: u16, value: u8) {
-        //get the u16 with the entry and 3 other entries
-        let mut d = self.values[env as usize / 4];
+        //get the u8 with the entry and 1 other entry
+        let mut d = self.values[env as usize / 2];
         //clear the 4 bits of the entry
-        d &= !(0xf << ((env%4)*4));
+        d &= !(0xf << ((env%2)*4));
         //set the entry
-        d |= (value as u16) << ((env%4)*4);
+        d |= (value as u8) << ((env%2)*4);
         //store
-        self.values[env as usize / 4] = d;
+        self.values[env as usize / 2] = d;
     }
 }
 
