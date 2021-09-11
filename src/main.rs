@@ -41,7 +41,6 @@ fn main () {
         window.set_draw_color(255,255,255);
         for wy in 0..win_h {
             for wx in 0..win_w {
-                //TODO: spread the "get"s over the field or something
                 let x = (wx as f64 * win_w_by_x).round() as usize;
                 let y = (wy as f64 * win_h_by_y).round() as usize;
                 if automata.get(x, y) {
