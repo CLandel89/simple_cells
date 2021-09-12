@@ -1,61 +1,42 @@
-const CHUNK_W: usize = 8;
-
-/*
-A "chunk" is a CHUNK_W × CHUNK_W piece of the field.
-*/
-pub struct Chunk {
-    data: [u8; CHUNK_W*CHUNK_W/8],
-}
-impl Chunk {
-    pub fn new () -> Chunk {
-        Chunk {
-            data: [0; CHUNK_W*CHUNK_W/8],
-        }
-    }
-    pub fn get (&self, x:usize, y:usize) -> bool {
-        let di = y * CHUNK_W / 8 + x / 8;
-        let d = self.data[di];
-        (d >> (x%8)) & 1 != 0
-    }
-    pub fn set (&mut self, x:usize, y:usize, v:bool) {
-        let di = y * CHUNK_W / 8 + x / 8;
-        let mut d = self.data[di];
-        let v8 = (v as u8) << (x%8);
-        let clear = (1 << (x%8)) ^ v8;
-        d |= v8; //sets the bit if v was set
-        d &= !clear; //clears the bit if v was not set
-        self.data[di] = d;
-    }
-    // Sets a 2×1 piece of the chunk, assuming x%2==0 and y%2==0, and v&(!3) == 0.
-    pub fn set2 (&mut self, x:usize, y:usize, v:u8) {
-        let v8 = v << (x%8);
-        let di = y * CHUNK_W / 8 + x / 8;
-        let mut d = self.data[di];
-        let clear = (3 << (x%8)) ^ v8;
-        d |= v8;
-        d &= !clear;
-        self.data[di] = d;
-    }
-}
-
 pub struct Field {
-    rows: Vec<Vec<Chunk>>,
+    data: Vec<Vec<u8>>,
+    pub w: usize,
+    pub h: usize,
 }
 impl Field {
     pub fn new (w:usize, h:usize) -> Field {
-        let n_chunks_per_row = 2 + (w as f64 / (CHUNK_W as f64)).ceil() as usize;
-        let n_rows = 2 + (h as f64 / (CHUNK_W as f64)).ceil() as usize;
-        let mut rows: Vec<Vec<Chunk>> = Vec::with_capacity(n_rows);
-        for _ in 0..n_rows {
-            let mut row: Vec<Chunk> = Vec::with_capacity(n_chunks_per_row);
-            for _ in 0..n_chunks_per_row {
-                row.push(Chunk::new());
+        let pitch = ((w as f64) / 8_f64).ceil() as usize;
+        let mut data: Vec<Vec<u8>> = Vec::with_capacity(h);
+        for _ in 0 .. h {
+            let mut row = Vec::<u8>::with_capacity(pitch);
+            for _ in 0 .. pitch {
+                row.push(0);
             }
-            rows.push(row);
+            data.push(row);
         }
         Field {
-            rows: rows,
+            data: data,
+            w: w,
+            h: h,
         }
+    }
+    pub fn get (&self, x:usize, y:usize) -> bool {
+        ((self.data[y][x/8] >> (x%8)) & 1) != 0
+    }
+    pub fn set (&mut self, x:usize, y:usize, v:bool) {
+        let v8 = (v as u8) << (x%8);
+        let mut d = self.data[y][x/8];
+        d &= !(1 << (x%8));
+        d |= v8;
+        self.data[y][x/8] = d;
+    }
+    // Sets a 2×1 piece of the field, assuming x%2==0 and y%2==0, and v&(!3) == 0.
+    pub fn set2 (&mut self, x:usize, y:usize, v:u8) {
+        let v8 = v << (x%8);
+        let mut d = self.data[y][x/8];
+        d &= !(3 << (x%8));
+        d |= v8;
+        self.data[y][x/8] = d;
     }
 }
 
@@ -128,111 +109,117 @@ impl Table {
     }
 }
 
-//designating indices for positions in a 3×3 arrangement
-const TL:usize=0; const TM:usize=1; const TR:usize=2;
-const ML:usize=3; const MM:usize=4; const MR:usize=5;
-const BL:usize=6; const BM:usize=7; const BR:usize=8;
-
 pub struct Worker<'a> {
-    env: [&'a Chunk; 9], //a 3×3 arrangement
-    target: &'a mut Chunk,
+    source: &'a Field,
+    target: &'a mut Field,
     table: &'a Table,
 }
 impl<'a> Worker<'a> {
     pub fn play (&mut self) {
-        let env = &self.env;
+        let source = &self.source;
         let target = &mut self.target;
         let table = &self.table;
+        let w = source.w;
+        let h = source.h;
         let mut src: u16;
-        let collect_src = |bits: [(usize,usize,usize); 12]| {
+        let collect_src = |bits: [Option<(usize,usize)>; 12]| {
             let mut src = 0u16;
             for i in 0..12 {
-                let env_i = bits[i].0;
-                let x = bits[i].1;
-                let y = bits[i].2;
-                src |= (env[env_i].get(x,y) as u16) << i;
+                match bits[i] {
+                    Some(b) => {
+                        let x = b.0;
+                        let y = b.1;
+                        src |= (source.get(x,y) as u16) << i;
+                    },
+                    None => {}
+                }
             }
             src
         };
-        // some magic numbers we'll use more often
-        const CW1: usize = CHUNK_W - 1;
-        const CW2: usize = CHUNK_W - 2;
-        const CW3: usize = CHUNK_W - 3;
+        let collect_src_noopt = |bits: [(usize,usize); 12]| {
+            let mut src = 0u16;
+            for i in 0..12 {
+                let x = bits[i].0;
+                let y = bits[i].1;
+                src |= (source.get(x,y) as u16) << i;
+            }
+            src
+        };
         // top left corner
         src = collect_src([
-            (TL,CW1,CW1), (TM,0,CW1), (TM,1,CW1), (TM,2,CW1),
-            (ML,CW1,0), (MM,0,0), (MM,1,0), (MM,2,0),
-            (ML,CW1,1), (MM,0,1), (MM,1,1), (MM,2,1),
+            None, None,        None,        None,
+            None, Some((0,0)), Some((1,0)), Some((2,0)),
+            None, Some((0,1)), Some((1,1)), Some((2,1))
         ]);
         target.set2(0,0, table.get(src));
         // top stripe
-        for x in (2..CW2).step_by(2) {
+        for x in (2..w-2).step_by(2) {
             src = collect_src([
-                (TM,x-1,CW1), (TM,x,CW1), (TM,x+1,CW1), (TM,x+2,CW1),
-                (MM,x-1,0), (MM,x,0), (MM,x+1,0), (MM,x+2,0),
-                (MM,x-1,1), (MM,x,1), (MM,x+1,1), (MM,x+2,1),
+                None,          None,        None,          None,
+                Some((x-1,0)), Some((x,0)), Some((x+1,0)), Some((x+2,0)),
+                Some((x-1,1)), Some((x,1)), Some((x+1,1)), Some((x+2,1))
             ]);
             target.set2(x,0, table.get(src));
         }
         // top right corner
         src = collect_src([
-            (TM,CW3,CW1), (TM,CW2,CW1), (TM,CW1,CW1), (TR,0,CW1),
-            (MM,CW3,0), (MM,CW2,0), (MM,CW1,0), (MR,0,0),
-            (MM,CW3,1), (MM,CW2,1), (MM,CW1,1), (MR,0,1),
+            None,          None,          None,          None,
+            Some((w-3,0)), Some((w-2,0)), Some((w-1,0)), None,
+            Some((w-3,1)), Some((w-2,1)), Some((w-1,1)), None
         ]);
-        target.set2(CW2,0, table.get(src));
+        target.set2(w-2,0, table.get(src));
         // left stripe
-        for y in 1..CW1 {
+        for y in 1..h-1 {
             src = collect_src([
-                (ML,CW1,y-1), (MM,0,y-1), (MM,1,y-1), (MM,2,y-1),
-                (ML,CW1,y), (MM,0,y), (MM,1,y), (MM,2,y),
-                (ML,CW1,y+1), (MM,0,y+1), (MM,1,y+1), (MM,2,y+1),
+                None, Some((0,y-1)), Some((1,y-1)), Some((2,y-1)),
+                None, Some((0,y)),   Some((1,y)),   Some((2,y)),
+                None, Some((0,y+1)), Some((1,y+1)), Some((2,y+1))
             ]);
             target.set2(0,y, table.get(src));
         }
         // mid block
-        for y in 1..CW1 {
-            for x in (2..CW2).step_by(2) {
-                src = collect_src([
-                    (MM,x-1,y-1), (MM,x,y-1), (MM,x+1,y-1), (MM,x+2,y-1),
-                    (MM,x-1,y), (MM,x,y), (MM,x+1,y), (MM,x+2,y),
-                    (MM,x-1,y+1), (MM,x,y+1), (MM,x+1,y+1), (MM,x+2,y+1),
+        for y in 1..h-1 {
+            for x in (2..w-2).step_by(2) {
+                src = collect_src_noopt([
+                    (x-1,y-1), (x,y-1), (x+1,y-1), (x+2,y-1),
+                    (x-1,y),   (x,y),   (x+1,y),   (x+2,y),
+                    (x-1,y+1), (x,y+1), (x+1,y+1), (x+2,y+1)
                 ]);
                 target.set2(x,y, table.get(src));
             }
         }
         // right stripe
-        for y in 1..CW1 {
+        for y in 1..h-1 {
             src = collect_src([
-                (MM,CW3,y-1), (MM,CW2,y-1), (MM,CW1,y-1), (MR,0,y-1),
-                (MM,CW3,y), (MM,CW2,y), (MM,CW1,y), (MR,0,y),
-                (MM,CW3,y+1), (MM,CW2,y+1), (MM,CW1,y+1), (MR,0,y+1),
+                Some((w-3,y-1)), Some((w-2,y-1)), Some((w-1,y-1)), None,
+                Some((w-3,y)),   Some((w-2,y)),   Some((w-1,y)),   None,
+                Some((w-3,y+1)), Some((w-2,y+1)), Some((w-1,y+1)), None
             ]);
-            target.set2(CW2,y, table.get(src));
+            target.set2(w-2,y, table.get(src));
         }
         // bottom left corner
         src = collect_src([
-            (ML,CW1,CW2), (MM,0,CW2), (MM,1,CW2), (MM,2,CW2),
-            (ML,CW1,CW1), (MM,0,CW1), (MM,1,CW1), (MM,2,CW1),
-            (BL,CW1,0), (BM,0,0), (BM,1,0), (BM,2,0)
+            None, Some((0,h-2)), Some((1,h-2)), Some((2,h-2)),
+            None, Some((0,h-1)), Some((1,h-1)), Some((2,h-1)),
+            None, None,          None,          None
         ]);
-        target.set2(0,CW1, table.get(src));
+        target.set2(0,h-1, table.get(src));
         // bottom stripe
-        for x in (2..CW2).step_by(2) {
+        for x in (2..w-2).step_by(2) {
             src = collect_src([
-                (MM,x-1,CW2), (MM,x,CW2), (MM,x+1,CW2), (MM,x+2,CW2),
-                (MM,x-1,CW1), (MM,x,CW1), (MM,x+1,CW1), (MM,x+2,CW1),
-                (BM,x-1,0), (BM,x,0), (BM,x+1,0), (BM,x+2,0)
+                Some((x-1,h-2)), Some((x,h-2)), Some((x+1,h-2)), Some((x+2,h-2)),
+                Some((x-1,h-1)), Some((x,h-1)), Some((x+1,h-1)), Some((x+2,h-1)),
+                None,            None,          None,            None
             ]);
-            target.set2(x,CW1, table.get(src));
+            target.set2(x,h-1, table.get(src));
         }
         // bottom right corner
         src = collect_src([
-            (MM,CW3,CW3), (MM,CW2,CW3), (MM,CW1,CW3), (MR,0,CW3),
-            (MM,CW3,CW1), (MM,CW2,CW1), (MM,CW1,CW1), (MR,0,CW1),
-            (BM,CW3,0), (BM,CW2,0), (BM,CW1,0), (BR,0,0)
+            Some((w-3,h-2)), Some((w-2,h-2)), Some((w-1,h-2)), None,
+            Some((w-3,h-1)), Some((w-2,h-1)), Some((w-1,h-1)), None,
+            None,            None,            None,            None
         ]);
-        target.set2(CW2,CW1, table.get(src));
+        target.set2(w-2,h-1, table.get(src));
     }
 }
 
@@ -294,59 +281,20 @@ impl Automata {
             } else {
                 (&self.field0, &mut self.field1)
             };
-        // play on all chunks except for the margin
-        for cyi in 0 .. source.rows.len()-2 {
-            let cy = cyi + 1;
-            for cxi in 0 .. source.rows[0].len()-2 {
-                //snake movements so the cache can recycle more chunks
-                let cx = if cy%2 != 0 {
-                        source.rows[0].len()-2 - cxi
-                    } else {
-                        cxi + 1
-                    };
-                let mut worker = Worker {
-                    env: [
-                        &source.rows[cy-1][cx-1], &source.rows[cy-1][cx], &source.rows[cy-1][cx+1],
-                        &source.rows[cy][cx-1], &source.rows[cy][cx], &source.rows[cy][cx+1],
-                        &source.rows[cy+1][cx-1], &source.rows[cy+1][cx], &source.rows[cy+1][cx+1]
-                    ],
-                    target: &mut target.rows[cy][cx],
-                    table: &self.table,
-                };
-                worker.play();
-            }
-        }
-        // clear smaller margins, if necessairy
-        if (self.borns >> 0) & 1 == 0 {
-            //TODO: Check if rules like B0 work correctly
-            if self.w%CHUNK_W != 0 {
-                for y in 0 .. self.h+1 {
-                    self.set(self.w, y, false);
-                }
-            }
-            if self.h%CHUNK_W != 0 {
-                for x in 0 .. self.w+1 {
-                    self.set(x, self.h, false);
-                }
-            }
-        }
-        // the field is all set, now swap source and target
+        let mut worker = Worker {
+            source: source,
+            target: target,
+            table: &self.table,
+        };
+        worker.play();
         self.fields_swapped = !self.fields_swapped;
     }
     pub fn get (&self, x:usize, y:usize) -> bool {
         let field = if self.fields_swapped { &self.field1 } else { &self.field0 };
-        let rowi = 1 + y / CHUNK_W;
-        let ci = 1 + x / CHUNK_W;
-        let xo = x % CHUNK_W;
-        let yo = y % CHUNK_W;
-        field.rows[rowi][ci].get(xo, yo)
+        field.get(x,y)
     }
     pub fn set (&mut self, x:usize, y:usize, v:bool) {
         let field = if self.fields_swapped { &mut self.field1 } else { &mut self.field0 };
-        let rowi = 1 + y / CHUNK_W;
-        let ci = 1 + x / CHUNK_W;
-        let xo = x % CHUNK_W;
-        let yo = y % CHUNK_W;
-        field.rows[rowi][ci].set(xo, yo, v);
+        field.set(x,y,v);
     }
 }
