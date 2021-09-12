@@ -286,21 +286,23 @@ impl Automata {
             table: Table::new(borns, survives),
         }
     }
-    // Plays a round of Game Of Life or so.
-    pub fn play (&mut self) {
-        let (source, target) = 
-            if self.fields_swapped {
-                (&self.field1, &mut self.field0)
-            } else {
-                (&self.field0, &mut self.field1)
+    // Plays n rounds of Game Of Life or so.
+    pub fn play (&mut self, n_rounds: usize) {
+        for _ in 0..n_rounds {
+            let (source, target) =
+                if self.fields_swapped {
+                    (&self.field1, &mut self.field0)
+                } else {
+                    (&self.field0, &mut self.field1)
+                };
+            let mut worker = Worker {
+                source: source,
+                target: target,
+                table: &self.table,
             };
-        let mut worker = Worker {
-            source: source,
-            target: target,
-            table: &self.table,
-        };
-        worker.play();
-        self.fields_swapped = !self.fields_swapped;
+            worker.play();
+            self.fields_swapped = !self.fields_swapped;
+        }
     }
     pub fn get (&self, x:usize, y:usize) -> bool {
         let field = if self.fields_swapped { &self.field1 } else { &self.field0 };

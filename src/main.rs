@@ -55,9 +55,7 @@ fn main () {
         if window.exit_issued {
             break;
         }
-        for _ in 0..rpf {
-            automata.play();
-        }
+        automata.play(rpf as usize);
         n += rpf as usize;
         r_counter += rpf;
         let elapsed = t_counter.elapsed();
