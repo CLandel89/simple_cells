@@ -9,3 +9,8 @@ Modify seed.json and seed.png to suit your needs.
 Note that the size of seed.png defines the size of the automata and the allocated RAM. If you prefer very spacious automata, you may need another software that implements data compression (such as the aforementioned more powerful tool).
 
 RESTRICTION: The width (in seed.png) must be an even number.
+
+To run this, open a shell, `cd` into the `simple_cells` directory and fire up the Rust toolchain WITH optimizations:
+```
+cargo run --release
+```
