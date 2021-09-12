@@ -2,7 +2,7 @@ simple_cells
 ============
 simple_cells is a laboratory for some cellular automata like Conway's Game Of Life.
 
-If you are looking for a more powerful tool, have a look at [http://golly.sourceforge.net/]. Golly can be used to try out patterns and seeds. Though being inspired, this project is not related to Golly in any other way.
+If you are looking for a more powerful tool, have a look at http://golly.sourceforge.net/. Golly can be used to try out patterns and seeds. Though being inspired, this project is not related to Golly in any other way.
 
 Modify seed.json and seed.png to suit your needs.
 
