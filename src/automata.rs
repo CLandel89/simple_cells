@@ -122,102 +122,115 @@ impl<'a> Worker<'a> {
         let w = source.w;
         let h = source.h;
         let mut src: u16;
-        let collect_src = |bits: [Option<(usize,usize)>; 12]| {
+        let collect_src = |bits: [Option<(usize,&Vec<u8>)>; 12]| {
             let mut src = 0u16;
             for i in 0..12 {
                 match bits[i] {
                     Some(b) => {
                         let x = b.0;
-                        let y = b.1;
-                        src |= (source.get(x,y) as u16) << i;
+                        let row = b.1;
+                        let v = ((row[x/8] >> (x%8)) & 1) as u16;
+                        src |= v << i;
                     },
-                    None => {}
+                    None => {},
                 }
             }
             src
         };
-        let collect_src_noopt = |bits: [(usize,usize); 12]| {
+        let collect_src_noopt = |bits: [(usize,&Vec<u8>); 12]| {
             let mut src = 0u16;
             for i in 0..12 {
                 let x = bits[i].0;
-                let y = bits[i].1;
-                src |= (source.get(x,y) as u16) << i;
+                let row = bits[i].1;
+                let v = ((row[x/8] >> (x%8)) & 1) as u16;
+                src |= v << i;
             }
             src
         };
+        let /*const*/ EMPTY: Vec<u8> = Vec::with_capacity(0);
         // top left corner
+        let (mut T, mut M, mut B);
+        T = &EMPTY; M = &source.data[0]; B = &source.data[1];
         src = collect_src([
             None, None,        None,        None,
-            None, Some((0,0)), Some((1,0)), Some((2,0)),
-            None, Some((0,1)), Some((1,1)), Some((2,1))
+            None, Some((0,M)), Some((1,M)), Some((2,M)),
+            None, Some((0,B)), Some((1,B)), Some((2,B))
         ]);
         target.set2(0,0, table.get(src));
         // top stripe
+        T = &EMPTY; M = &source.data[0]; B = &source.data[1];
         for x in (2..w-2).step_by(2) {
             src = collect_src([
                 None,          None,        None,          None,
-                Some((x-1,0)), Some((x,0)), Some((x+1,0)), Some((x+2,0)),
-                Some((x-1,1)), Some((x,1)), Some((x+1,1)), Some((x+2,1))
+                Some((x-1,M)), Some((x,M)), Some((x+1,M)), Some((x+2,M)),
+                Some((x-1,B)), Some((x,B)), Some((x+1,B)), Some((x+2,B))
             ]);
             target.set2(x,0, table.get(src));
         }
         // top right corner
+        T = &EMPTY; M = &source.data[0]; B = &source.data[1];
         src = collect_src([
             None,          None,          None,          None,
-            Some((w-3,0)), Some((w-2,0)), Some((w-1,0)), None,
-            Some((w-3,1)), Some((w-2,1)), Some((w-1,1)), None
+            Some((w-3,M)), Some((w-2,M)), Some((w-1,M)), None,
+            Some((w-3,B)), Some((w-2,B)), Some((w-1,B)), None
         ]);
         target.set2(w-2,0, table.get(src));
         // left stripe
         for y in 1..h-1 {
+            T = &source.data[y-1]; M = &source.data[y]; B = &source.data[y+1];
             src = collect_src([
-                None, Some((0,y-1)), Some((1,y-1)), Some((2,y-1)),
-                None, Some((0,y)),   Some((1,y)),   Some((2,y)),
-                None, Some((0,y+1)), Some((1,y+1)), Some((2,y+1))
+                None, Some((0,T)), Some((1,T)), Some((2,T)),
+                None, Some((0,M)), Some((1,M)), Some((2,M)),
+                None, Some((0,B)), Some((1,B)), Some((2,B))
             ]);
             target.set2(0,y, table.get(src));
         }
         // mid block
         for y in 1..h-1 {
+            T = &source.data[y-1]; M = &source.data[y]; B = &source.data[y+1];
             for x in (2..w-2).step_by(2) {
                 src = collect_src_noopt([
-                    (x-1,y-1), (x,y-1), (x+1,y-1), (x+2,y-1),
-                    (x-1,y),   (x,y),   (x+1,y),   (x+2,y),
-                    (x-1,y+1), (x,y+1), (x+1,y+1), (x+2,y+1)
+                    (x-1,T), (x,T), (x+1,T), (x+2,T),
+                    (x-1,M), (x,M), (x+1,M), (x+2,M),
+                    (x-1,B), (x,B), (x+1,B), (x+2,B)
                 ]);
                 target.set2(x,y, table.get(src));
             }
         }
         // right stripe
         for y in 1..h-1 {
+            T = &source.data[y-1]; M = &source.data[y]; B = &source.data[y+1];
             src = collect_src([
-                Some((w-3,y-1)), Some((w-2,y-1)), Some((w-1,y-1)), None,
-                Some((w-3,y)),   Some((w-2,y)),   Some((w-1,y)),   None,
-                Some((w-3,y+1)), Some((w-2,y+1)), Some((w-1,y+1)), None
+                Some((w-3,T)), Some((w-2,T)), Some((w-1,T)), None,
+                Some((w-3,M)), Some((w-2,M)), Some((w-1,M)), None,
+                Some((w-3,B)), Some((w-2,B)), Some((w-1,B)), None
             ]);
             target.set2(w-2,y, table.get(src));
         }
         // bottom left corner
+        T = &source.data[h-2]; M = &source.data[h-1]; B = &EMPTY;
         src = collect_src([
-            None, Some((0,h-2)), Some((1,h-2)), Some((2,h-2)),
-            None, Some((0,h-1)), Some((1,h-1)), Some((2,h-1)),
-            None, None,          None,          None
+            None, Some((0,T)), Some((1,T)), Some((2,T)),
+            None, Some((0,M)), Some((1,M)), Some((2,M)),
+            None, None,        None,        None
         ]);
         target.set2(0,h-1, table.get(src));
         // bottom stripe
+        T = &source.data[h-2]; M = &source.data[h-1]; B = &EMPTY;
         for x in (2..w-2).step_by(2) {
             src = collect_src([
-                Some((x-1,h-2)), Some((x,h-2)), Some((x+1,h-2)), Some((x+2,h-2)),
-                Some((x-1,h-1)), Some((x,h-1)), Some((x+1,h-1)), Some((x+2,h-1)),
-                None,            None,          None,            None
+                Some((x-1,T)), Some((x,T)), Some((x+1,T)), Some((x+2,T)),
+                Some((x-1,M)), Some((x,M)), Some((x+1,M)), Some((x+2,M)),
+                None,          None,        None,          None
             ]);
             target.set2(x,h-1, table.get(src));
         }
         // bottom right corner
+        T = &source.data[h-2]; M = &source.data[h-1]; B = &EMPTY;
         src = collect_src([
-            Some((w-3,h-2)), Some((w-2,h-2)), Some((w-1,h-2)), None,
-            Some((w-3,h-1)), Some((w-2,h-1)), Some((w-1,h-1)), None,
-            None,            None,            None,            None
+            Some((w-3,T)), Some((w-2,T)), Some((w-1,T)), None,
+            Some((w-3,M)), Some((w-2,M)), Some((w-1,M)), None,
+            None,          None,          None,          None
         ]);
         target.set2(w-2,h-1, table.get(src));
     }
