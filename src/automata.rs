@@ -244,9 +244,6 @@ pub struct Automata {
     field0: Field,
     field1: Field,
     fields_swapped: bool,
-    //the rules
-    borns: u16,
-    survives: u16,
     //optimization
     table: Table,
 }
@@ -281,8 +278,6 @@ impl Automata {
             field1: Field::new(w,h),
             fields_swapped: false,
             seed_json: seed_json,
-            borns: borns,
-            survives: survives,
             table: Table::new(borns, survives),
         }
     }
