@@ -30,15 +30,12 @@ impl Field {
         d |= v8;
         self.data[y][x/8] = d;
     }
-    // Sets a 2×1 piece of the field, assuming x%2==0 and y%2==0, and v&(!3) == 0.
-    pub fn set2 (&mut self, x:usize, y:usize, v:u8) {
-        let v8 = v << (x%8);
-        let mut d = self.data[y][x/8];
-        d &= !(3 << (x%8));
-        d |= v8;
-        self.data[y][x/8] = d;
-    }
 }
+
+// These indices are for 3×3 surrounding environments.
+const TL:usize=0; const TM:usize=1; const TR:usize=2;
+const ML:usize=3; const MM:usize=4; const MR:usize=5;
+const BL:usize=6; const BM:usize=7; const BR:usize=8;
 
 /*
 The "table" is the storage for all 2×1 results of 4×3 field slices.
@@ -49,8 +46,8 @@ pub struct Table {
     values: [u8; 4096/4],
 }
 impl Table {
-    pub fn new (borns: u16, survives: u16) -> Table {
-        let mut table = Table {
+    pub fn new (borns: u16, survives: u16) -> Self {
+        let mut new = Self {
             values: [0; 4096/4],
         };
         for env in 0..4096 {
@@ -75,6 +72,7 @@ impl Table {
                 }
                 return false;
             };
+            // env shifting numbers:
             //  0  1  2  3
             //  4  5  6  7
             //  8  9 10 11
@@ -87,17 +85,17 @@ impl Table {
                 value |= 1 << 1;
             }
             //0 to 2 bits are set in "value", now store
-            table.set(env, value);
+            new.set(env, value);
         }
-        table
+        new
     }
-    pub fn get (&self, env: u16) -> u8 {
+    fn get (&self, env: u16) -> u8 {
         //get the u8 with the entry and 1 other entry
         let d = self.values[env as usize / 4];
         //shift the entry to the LSB and clear any MSB past 2 bits
         ((d >> ((env%4)*2)) & 3)
     }
-    pub fn set (&mut self, env: u16, value: u8) {
+    fn set (&mut self, env: u16, value: u8) {
         //get the u8 with the entry and 1 other entry
         let mut d = self.values[env as usize / 4];
         //clear the 4 bits of the entry
@@ -106,6 +104,48 @@ impl Table {
         d |= (value as u8) << ((env%4)*2);
         //store
         self.values[env as usize / 4] = d;
+    }
+    /*
+    Calculates a new byte from the environment of 9 bytes.
+    In other words: New 8×1 slice from an 8×3 slice.
+    */
+    pub fn work_u8 (&self, env: &[u8;9]) -> u8 {
+        let mut result: u8 = 0;
+        let collect_env12 = |spot: &[(usize,usize); 12]| {
+            let mut env12 = 0_u16;
+            for si in 0..12 {
+                let u8_i = spot[si].0;
+                let u8_shift = spot[si].1;
+                let bit = (env[u8_i] >> u8_shift) & 1;
+                env12 |= (bit as u16) << si;
+            }
+            env12
+        };
+        let env_0 = collect_env12(&[
+            (TL,7), (TM,0), (TM,1), (TM,2),
+            (ML,7), (MM,0), (MM,1), (MM,2),
+            (BL,7), (BM,0), (BM,1), (BM,2)
+        ]);
+        result |= self.get(env_0) << 0;
+        let env_2 = collect_env12(&[
+            (TM,1), (TM,2), (TM,3), (TM,4),
+            (MM,1), (MM,2), (MM,3), (MM,4),
+            (BM,1), (BM,2), (BM,3), (BM,4)
+        ]);
+        result |= self.get(env_2) << 2;
+        let env_4 = collect_env12(&[
+            (TM,3), (TM,4), (TM,5), (TM,6),
+            (MM,3), (MM,4), (MM,5), (MM,6),
+            (BM,3), (BM,4), (BM,5), (BM,6)
+        ]);
+        result |= self.get(env_4) << 4;
+        let env_6 = collect_env12(&[
+            (TM,5), (TM,6), (TM,7), (TR,0),
+            (MM,5), (MM,6), (MM,7), (MR,0),
+            (BM,5), (BM,6), (BM,7), (BR,0)
+        ]);
+        result |= self.get(env_6) << 6;
+        result
     }
 }
 
@@ -121,118 +161,94 @@ impl<'a> Worker<'a> {
         let table = &self.table;
         let w = source.w;
         let h = source.h;
-        let mut src: u16;
-        let collect_src = |bits: [Option<(usize,&Vec<u8>)>; 12]| {
-            let mut src = 0u16;
-            for i in 0..12 {
-                match bits[i] {
-                    Some(b) => {
-                        let x = b.0;
-                        let row = b.1;
-                        let v = ((row[x/8] >> (x%8)) & 1) as u16;
-                        src |= v << i;
-                    },
-                    None => {},
-                }
+        let w8 = source.data[0].len();
+        // in case there are bits in each last byte that need to be cleared
+        let mut cutoff = 0_u8;
+        if w%8 != 0 {
+            for ci in w%8 .. 8 {
+                cutoff |= 1 << ci;
             }
-            src
-        };
-        let collect_src_noopt = |bits: [(usize,&Vec<u8>); 12]| {
-            let mut src = 0u16;
-            for i in 0..12 {
-                let x = bits[i].0;
-                let row = bits[i].1;
-                let v = ((row[x/8] >> (x%8)) & 1) as u16;
-                src |= v << i;
-            }
-            src
-        };
-        let /*const*/ EMPTY: Vec<u8> = Vec::with_capacity(0);
+        }
+        // source field rows
+        let (mut trow, mut mrow, mut brow);
+        // source rows for target top row
+        mrow = &source.data[0];
+        brow = &source.data[1];
         // top left corner
-        let (mut T, mut M, mut B);
-        T = &EMPTY; M = &source.data[0]; B = &source.data[1];
-        src = collect_src([
-            None, None,        None,        None,
-            None, Some((0,M)), Some((1,M)), Some((2,M)),
-            None, Some((0,B)), Some((1,B)), Some((2,B))
+        target.data[0][0] = table.work_u8(&[
+            0, 0, 0,
+            0, mrow[0], mrow[1],
+            0, brow[0], brow[1]
         ]);
-        target.set2(0,0, table.get(src));
         // top stripe
-        T = &EMPTY; M = &source.data[0]; B = &source.data[1];
-        for x in (2..w-2).step_by(2) {
-            src = collect_src([
-                None,          None,        None,          None,
-                Some((x-1,M)), Some((x,M)), Some((x+1,M)), Some((x+2,M)),
-                Some((x-1,B)), Some((x,B)), Some((x+1,B)), Some((x+2,B))
+        for x8 in 1 .. w8-1 {
+            target.data[0][x8] = table.work_u8(&[
+                0, 0, 0,
+                mrow[x8-1], mrow[x8], mrow[x8+1],
+                brow[x8-1], brow[x8], brow[x8+1]
             ]);
-            target.set2(x,0, table.get(src));
         }
         // top right corner
-        T = &EMPTY; M = &source.data[0]; B = &source.data[1];
-        src = collect_src([
-            None,          None,          None,          None,
-            Some((w-3,M)), Some((w-2,M)), Some((w-1,M)), None,
-            Some((w-3,B)), Some((w-2,B)), Some((w-1,B)), None
+        target.data[0][mrow.len()-1] = table.work_u8(&[
+            0, 0, 0,
+            mrow[w8-2], mrow[w8-1], 0,
+            brow[w8-2], brow[w8-1], 0
         ]);
-        target.set2(w-2,0, table.get(src));
-        // left stripe
+        // top cutoff
+        target.data[0][w8-1] &= !cutoff;
+        // mid rows
         for y in 1..h-1 {
-            T = &source.data[y-1]; M = &source.data[y]; B = &source.data[y+1];
-            src = collect_src([
-                None, Some((0,T)), Some((1,T)), Some((2,T)),
-                None, Some((0,M)), Some((1,M)), Some((2,M)),
-                None, Some((0,B)), Some((1,B)), Some((2,B))
+            trow = &source.data[y-1];
+            mrow = &source.data[y];
+            brow = &source.data[y+1];
+            // left edge
+            target.data[y][0] = table.work_u8(&[
+                0, trow[0], trow[1],
+                0, mrow[0], mrow[1],
+                0, brow[0], brow[1]
             ]);
-            target.set2(0,y, table.get(src));
-        }
-        // mid block
-        for y in 1..h-1 {
-            T = &source.data[y-1]; M = &source.data[y]; B = &source.data[y+1];
-            for x in (2..w-2).step_by(2) {
-                src = collect_src_noopt([
-                    (x-1,T), (x,T), (x+1,T), (x+2,T),
-                    (x-1,M), (x,M), (x+1,M), (x+2,M),
-                    (x-1,B), (x,B), (x+1,B), (x+2,B)
+            // mid
+            for x8 in 1 .. w8-1 {
+                target.data[y][x8] = table.work_u8(&[
+                    trow[x8-1], trow[x8], trow[x8+1],
+                    mrow[x8-1], mrow[x8], mrow[x8+1],
+                    brow[x8-1], brow[x8], brow[x8+1]
                 ]);
-                target.set2(x,y, table.get(src));
             }
-        }
-        // right stripe
-        for y in 1..h-1 {
-            T = &source.data[y-1]; M = &source.data[y]; B = &source.data[y+1];
-            src = collect_src([
-                Some((w-3,T)), Some((w-2,T)), Some((w-1,T)), None,
-                Some((w-3,M)), Some((w-2,M)), Some((w-1,M)), None,
-                Some((w-3,B)), Some((w-2,B)), Some((w-1,B)), None
+            // right edge
+            target.data[y][w8-1] = table.work_u8(&[
+                trow[w8-2], trow[w8-1], 0,
+                mrow[w8-2], mrow[w8-1], 0,
+                brow[w8-2], brow[w8-1], 0
             ]);
-            target.set2(w-2,y, table.get(src));
+            // mid cutoff
+            target.data[y][w8-1] &= !cutoff;
         }
+        // source rows for target bottom row
+        trow = &source.data[h-2];
+        mrow = &source.data[h-1];
         // bottom left corner
-        T = &source.data[h-2]; M = &source.data[h-1]; B = &EMPTY;
-        src = collect_src([
-            None, Some((0,T)), Some((1,T)), Some((2,T)),
-            None, Some((0,M)), Some((1,M)), Some((2,M)),
-            None, None,        None,        None
+        target.data[h-1][0] = table.work_u8(&[
+            0, trow[0], trow[1],
+            0, mrow[0], mrow[1],
+            0, 0, 0
         ]);
-        target.set2(0,h-1, table.get(src));
         // bottom stripe
-        T = &source.data[h-2]; M = &source.data[h-1]; B = &EMPTY;
-        for x in (2..w-2).step_by(2) {
-            src = collect_src([
-                Some((x-1,T)), Some((x,T)), Some((x+1,T)), Some((x+2,T)),
-                Some((x-1,M)), Some((x,M)), Some((x+1,M)), Some((x+2,M)),
-                None,          None,        None,          None
+        for x8 in 1 .. w8-1 {
+            target.data[h-1][x8] = table.work_u8(&[
+                trow[x8-1], trow[x8], trow[x8+1],
+                mrow[x8-1], mrow[x8], mrow[x8+1],
+                0, 0, 0
             ]);
-            target.set2(x,h-1, table.get(src));
         }
         // bottom right corner
-        T = &source.data[h-2]; M = &source.data[h-1]; B = &EMPTY;
-        src = collect_src([
-            Some((w-3,T)), Some((w-2,T)), Some((w-1,T)), None,
-            Some((w-3,M)), Some((w-2,M)), Some((w-1,M)), None,
-            None,          None,          None,          None
+        target.data[h-1][w8-1] = table.work_u8(&[
+            trow[w8-2], trow[w8-1], 0,
+            mrow[w8-2], trow[w8-1], 0,
+            0, 0, 0
         ]);
-        target.set2(w-2,h-1, table.get(src));
+        // bottom cutoff
+        target.data[h-1][w8-1] &= !cutoff;
     }
 }
 
