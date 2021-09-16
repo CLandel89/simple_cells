@@ -107,7 +107,7 @@ impl Table {
     }
     /*
     Calculates a new byte from the environment of 9 bytes.
-    In other words: New 8×1 slice from an 8×3 slice.
+    In other words: New 8×1 slice from a 10×3 slice (with 14 bits ignored).
     */
     pub fn work_u8 (&self, env: &[u8;9]) -> u8 {
         let mut result: u8 = 0;
