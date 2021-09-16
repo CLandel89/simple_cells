@@ -1,3 +1,5 @@
+extern crate crossbeam;
+
 pub struct Field {
     data: Vec<Vec<u8>>,
     pub w: usize,
@@ -9,9 +11,7 @@ impl Field {
         let mut data: Vec<Vec<u8>> = Vec::with_capacity(h);
         for _ in 0 .. h {
             let mut row = Vec::<u8>::with_capacity(pitch);
-            for _ in 0 .. pitch {
-                row.push(0);
-            }
+            row.resize(pitch, 0);
             data.push(row);
         }
         Field {
@@ -151,17 +151,20 @@ impl Table {
 
 pub struct Worker<'a> {
     source: &'a Field,
-    target: &'a mut Field,
+    tx: crossbeam::channel::Sender <(usize,Vec<u8>)>,
     table: &'a Table,
+    n_threads: usize,
+    thread_i: usize,
 }
 impl<'a> Worker<'a> {
     pub fn play (&mut self) {
         let source = &self.source;
-        let target = &mut self.target;
         let table = &self.table;
         let w = source.w;
         let h = source.h;
         let w8 = source.data[0].len();
+        let mut data = Vec::<u8>::with_capacity(w8);
+        data.resize(w8, 0);
         // in case there are bits in each last byte that need to be cleared
         let mut cutoff = 0_u8;
         if w%8 != 0 {
@@ -171,84 +174,105 @@ impl<'a> Worker<'a> {
         }
         // source field rows
         let (mut trow, mut mrow, mut brow);
-        // source rows for target top row
-        mrow = &source.data[0];
-        brow = &source.data[1];
-        // top left corner
-        target.data[0][0] = table.work_u8(&[
-            0, 0, 0,
-            0, mrow[0], mrow[1],
-            0, brow[0], brow[1]
-        ]);
-        // top stripe
-        for x8 in 1 .. w8-1 {
-            target.data[0][x8] = table.work_u8(&[
+        // top row
+        let y = 0;
+        if y % self.n_threads == self.thread_i {
+            mrow = &source.data[y];
+            brow = &source.data[y+1];
+            // top left corner
+            let x8 = 0;
+            data[x8] = table.work_u8(&[
                 0, 0, 0,
-                mrow[x8-1], mrow[x8], mrow[x8+1],
-                brow[x8-1], brow[x8], brow[x8+1]
+                0, mrow[0], mrow[1],
+                0, brow[0], brow[1]
             ]);
+            // top stripe
+            for x8 in 1 .. w8-1 {
+                data[x8] = table.work_u8(&[
+                    0, 0, 0,
+                    mrow[x8-1], mrow[x8], mrow[x8+1],
+                    brow[x8-1], brow[x8], brow[x8+1]
+                ]);
+            }
+            // top right corner
+            let x8 = mrow.len()-1;
+            data[x8] = table.work_u8(&[
+                0, 0, 0,
+                mrow[w8-2], mrow[w8-1], 0,
+                brow[w8-2], brow[w8-1], 0
+            ]);
+            // top cutoff
+            data[x8] &= !cutoff;
+            // top tx
+            self.tx.send((y,data.clone())).unwrap();
         }
-        // top right corner
-        target.data[0][mrow.len()-1] = table.work_u8(&[
-            0, 0, 0,
-            mrow[w8-2], mrow[w8-1], 0,
-            brow[w8-2], brow[w8-1], 0
-        ]);
-        // top cutoff
-        target.data[0][w8-1] &= !cutoff;
         // mid rows
         for y in 1..h-1 {
+            if y % self.n_threads != self.thread_i {
+                continue;
+            }
             trow = &source.data[y-1];
             mrow = &source.data[y];
             brow = &source.data[y+1];
             // left edge
-            target.data[y][0] = table.work_u8(&[
+            let x8 = 0;
+            data[x8] = table.work_u8(&[
                 0, trow[0], trow[1],
                 0, mrow[0], mrow[1],
                 0, brow[0], brow[1]
             ]);
             // mid
             for x8 in 1 .. w8-1 {
-                target.data[y][x8] = table.work_u8(&[
+                data[x8] = table.work_u8(&[
                     trow[x8-1], trow[x8], trow[x8+1],
                     mrow[x8-1], mrow[x8], mrow[x8+1],
                     brow[x8-1], brow[x8], brow[x8+1]
                 ]);
             }
             // right edge
-            target.data[y][w8-1] = table.work_u8(&[
-                trow[w8-2], trow[w8-1], 0,
-                mrow[w8-2], mrow[w8-1], 0,
-                brow[w8-2], brow[w8-1], 0
+            let x8 = w8-1;
+            data[x8] = table.work_u8(&[
+                trow[x8-1], trow[x8], 0,
+                mrow[x8-1], mrow[x8], 0,
+                brow[x8-1], brow[x8], 0
             ]);
             // mid cutoff
-            target.data[y][w8-1] &= !cutoff;
+            data[x8] &= !cutoff;
+            // mid tx
+            self.tx.send((y,data.clone())).unwrap();
         }
-        // source rows for target bottom row
-        trow = &source.data[h-2];
-        mrow = &source.data[h-1];
-        // bottom left corner
-        target.data[h-1][0] = table.work_u8(&[
-            0, trow[0], trow[1],
-            0, mrow[0], mrow[1],
-            0, 0, 0
-        ]);
-        // bottom stripe
-        for x8 in 1 .. w8-1 {
-            target.data[h-1][x8] = table.work_u8(&[
-                trow[x8-1], trow[x8], trow[x8+1],
-                mrow[x8-1], mrow[x8], mrow[x8+1],
+        // bottom row
+        let y = h-1;
+        if y % self.n_threads == self.thread_i {
+            trow = &source.data[y-1];
+            mrow = &source.data[y];
+            // bottom left corner
+            let x8 = 0;
+            data[x8] = table.work_u8(&[
+                0, trow[x8], trow[x8+1],
+                0, mrow[x8], mrow[x8+1],
                 0, 0, 0
             ]);
+            // bottom stripe
+            for x8 in 1 .. w8-1 {
+                data[x8] = table.work_u8(&[
+                    trow[x8-1], trow[x8], trow[x8+1],
+                    mrow[x8-1], mrow[x8], mrow[x8+1],
+                    0, 0, 0
+                ]);
+            }
+            // bottom right corner
+            let x8 = w8-1;
+            data[x8] = table.work_u8(&[
+                trow[x8-1], trow[x8], 0,
+                mrow[x8-1], trow[x8], 0,
+                0, 0, 0
+            ]);
+            // bottom cutoff
+            data[x8] &= !cutoff;
+            // bottom tx
+            self.tx.send((y,data.clone())).unwrap();
         }
-        // bottom right corner
-        target.data[h-1][w8-1] = table.work_u8(&[
-            trow[w8-2], trow[w8-1], 0,
-            mrow[w8-2], trow[w8-1], 0,
-            0, 0, 0
-        ]);
-        // bottom cutoff
-        target.data[h-1][w8-1] &= !cutoff;
     }
 }
 
@@ -262,10 +286,11 @@ pub struct Automata {
     fields_swapped: bool,
     //optimization
     table: Table,
+    n_threads: usize,
 }
 
 impl Automata {
-    pub fn new (w:usize, h:usize) -> Automata {
+    pub fn new (w:usize, h:usize, n_threads:usize) -> Automata {
         let seed_json = json::parse(
                 & std::fs::read_to_string("seed.json")
                     .expect("Please ChDir to the path with the seed files and prefs.json.")
@@ -295,6 +320,7 @@ impl Automata {
             fields_swapped: false,
             seed_json: seed_json,
             table: Table::new(borns, survives),
+            n_threads: n_threads,
         }
     }
     // Plays n rounds of Game Of Life or so.
@@ -306,12 +332,39 @@ impl Automata {
                 } else {
                     (&self.field0, &mut self.field1)
                 };
-            let mut worker = Worker {
-                source: source,
-                target: target,
-                table: &self.table,
-            };
-            worker.play();
+            let h = source.h;
+            let table = &self.table;
+            let n_threads = self.n_threads;
+            let (tx, rx):
+                (
+                    crossbeam::channel::Sender <(usize,Vec<u8>)>,
+                    crossbeam::channel::Receiver <(usize,Vec<u8>)>
+                )
+                =
+                    crossbeam::channel::bounded(0);
+            crossbeam::scope(|s| {
+                for thread_i in 0..n_threads {
+                    let tx_clone = tx.clone();
+                    s.spawn(move |_| {
+                        let mut worker = Worker {
+                            source: source,
+                            tx: tx_clone,
+                            table: table,
+                            n_threads: n_threads,
+                            thread_i: thread_i,
+                        };
+                        worker.play();
+                    });
+                }
+                let mut n_collected = 0_usize;
+                for (y, data) in rx {
+                    n_collected += 1;
+                    target.data[y] = data;
+                    if n_collected == h {
+                        break;
+                    }
+                }
+            });
             self.fields_swapped = !self.fields_swapped;
         }
     }
