@@ -6,5 +6,6 @@ authors = ["GitHub:CLandel89"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+crossbeam = "*"
 sdl2 = { version = "*", features = ["image"] }
 json = "*"

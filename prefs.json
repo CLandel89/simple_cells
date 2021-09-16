@@ -1,6 +1,6 @@
 {
-    "n_threads": 4,
-    "window_w": 512,
-    "window_h": 512,
-    "fps": 0.25
+    "n_threads": 5,
+    "window_w": 1024,
+    "window_h": 1024,
+    "fps": 2
 }
