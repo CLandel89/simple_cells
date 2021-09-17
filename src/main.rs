@@ -32,7 +32,7 @@ fn main () {
         }
     }
     let mut n = 0_usize;
-    let mut rpf = 1_isize; //playing rounds per frame
+    let mut rpf = 1_f64; //playing rounds per frame
     let mut t_counter = Instant::now();
     let mut f_counter = 0_usize;
     let mut r_counter = 0_isize;
@@ -58,16 +58,16 @@ fn main () {
         }
         automata.play(rpf as usize);
         n += rpf as usize;
-        r_counter += rpf;
+        r_counter += rpf as isize;
         let elapsed = t_counter.elapsed();
         if f_counter == 16 || elapsed >= SECOND {
             t_counter = Instant::now();
             let dur = (elapsed.as_millis() as f64) / 1000.0;
             let rps = (r_counter as f64) / dur;
-            let rpf_new = (rps / fps) as isize;
-            rpf = (3*rpf + rpf_new) / 4;
-            if rpf <= 0 {
-                rpf = 1;
+            let rpf_new = rps / fps;
+            rpf = (3.0*rpf + rpf_new) / 4.0;
+            if rpf < 1.0 {
+                rpf = 1.0;
             }
             f_counter = 0;
             r_counter = 0;
