@@ -1,34 +1,35 @@
 extern crate crossbeam;
 
 pub struct Field {
-    data: Vec<Vec<u8>>,
+    data: Vec<u8>,
     pub w: usize,
     pub h: usize,
+    pub w8: usize,
 }
 impl Field {
     pub fn new (w:usize, h:usize) -> Field {
-        let pitch = ((w as f64) / 8_f64).ceil() as usize;
-        let mut data: Vec<Vec<u8>> = Vec::with_capacity(h);
-        for _ in 0 .. h {
-            let mut row = Vec::<u8>::with_capacity(pitch);
-            row.resize(pitch, 0);
-            data.push(row);
-        }
+        let w8 = ((w as f64) / 8_f64).ceil() as usize;
+        let mut data: Vec<u8> = Vec::with_capacity(h*w8);
+        data.resize(h*w8, 0);
         Field {
             data: data,
             w: w,
             h: h,
+            w8: w8,
         }
     }
     pub fn get (&self, x:usize, y:usize) -> bool {
-        ((self.data[y][x/8] >> (x%8)) & 1) != 0
+        let di = y*self.w8 + x/8;
+        let d = self.data[di];
+        ((d >> (x%8)) & 1) != 0
     }
     pub fn set (&mut self, x:usize, y:usize, v:bool) {
         let v8 = (v as u8) << (x%8);
-        let mut d = self.data[y][x/8];
+        let di = y*self.w8 + x/8;
+        let mut d = self.data[di];
         d &= !(1 << (x%8));
         d |= v8;
-        self.data[y][x/8] = d;
+        self.data[di] = d;
     }
 }
 
@@ -162,7 +163,7 @@ impl<'a> Worker<'a> {
         let table = &self.table;
         let w = source.w;
         let h = source.h;
-        let w8 = source.data[0].len();
+        let w8 = source.w8;
         let mut data = Vec::<u8>::with_capacity(w8);
         data.resize(w8, 0);
         // in case there are bits in each last byte that need to be cleared
@@ -177,8 +178,8 @@ impl<'a> Worker<'a> {
         // top row
         let y = 0;
         if y % self.n_threads == self.thread_i {
-            mrow = &source.data[y];
-            brow = &source.data[y+1];
+            mrow = &source.data[y*w8..];
+            brow = &source.data[(y+1)*w8..];
             // top left corner
             let x8 = 0;
             data[x8] = table.work_u8(&[
@@ -195,7 +196,7 @@ impl<'a> Worker<'a> {
                 ]);
             }
             // top right corner
-            let x8 = mrow.len()-1;
+            let x8 = w8-1;
             data[x8] = table.work_u8(&[
                 0, 0, 0,
                 mrow[w8-2], mrow[w8-1], 0,
@@ -211,9 +212,9 @@ impl<'a> Worker<'a> {
             if y % self.n_threads != self.thread_i {
                 continue;
             }
-            trow = &source.data[y-1];
-            mrow = &source.data[y];
-            brow = &source.data[y+1];
+            trow = &source.data[(y-1)*w8..];
+            mrow = &source.data[y*w8..];
+            brow = &source.data[(y+1)*w8..];
             // left edge
             let x8 = 0;
             data[x8] = table.work_u8(&[
@@ -244,8 +245,8 @@ impl<'a> Worker<'a> {
         // bottom row
         let y = h-1;
         if y % self.n_threads == self.thread_i {
-            trow = &source.data[y-1];
-            mrow = &source.data[y];
+            trow = &source.data[(y-1)*w8..];
+            mrow = &source.data[y*w8..];
             // bottom left corner
             let x8 = 0;
             data[x8] = table.work_u8(&[
@@ -281,7 +282,7 @@ pub struct Automata {
     w: usize,
     h: usize,
     //these work like a double buffer
-    field0: Field,
+    pub field0: Field,
     field1: Field,
     fields_swapped: bool,
     //optimization
@@ -333,6 +334,7 @@ impl Automata {
                     (&self.field0, &mut self.field1)
                 };
             let h = source.h;
+            let w8 = source.w8;
             let table = &self.table;
             let n_threads = self.n_threads;
             let (tx, rx):
@@ -359,7 +361,7 @@ impl Automata {
                 let mut n_collected = 0_usize;
                 for (y, data) in rx {
                     n_collected += 1;
-                    target.data[y] = data;
+                    target.data[y*w8..(y+1)*w8].clone_from_slice(&data[..]);
                     if n_collected == h {
                         break;
                     }
