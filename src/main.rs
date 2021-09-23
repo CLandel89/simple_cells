@@ -21,8 +21,8 @@ fn main () {
         let ((w,h), seed) = window.seed_png();
         win_w_by_x = (w as f64) / (win_w as f64);
         win_h_by_y = (h as f64) / (win_h as f64);
-        let n_threads = prefs_json["n_threads"].as_usize().unwrap();
-        automata = automata::Automata::new(w, h, n_threads);
+        let gpu_i = prefs_json["gpu_i"].as_usize().unwrap();
+        automata = automata::Automata::new(w, h, gpu_i).unwrap();
         for y in 0..h {
             let row = &seed[y];
             for x in 0..w {

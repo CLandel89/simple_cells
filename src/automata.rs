@@ -1,4 +1,5 @@
-extern crate crossbeam;
+extern crate opencl3 as cl;
+use automata::cl::memory::ClMem;
 
 pub struct Field {
     data: Vec<u8>,
@@ -106,175 +107,6 @@ impl Table {
         //store
         self.values[env as usize / 4] = d;
     }
-    /*
-    Calculates a new byte from the environment of 9 bytes.
-    In other words: New 8×1 slice from a 10×3 slice (with 14 bits ignored).
-    */
-    pub fn work_u8 (&self, env: &[u8;9]) -> u8 {
-        let mut result: u8 = 0;
-        let collect_env12 = |spot: &[(usize,usize); 12]| {
-            let mut env12 = 0_u16;
-            for si in 0..12 {
-                let u8_i = spot[si].0;
-                let u8_shift = spot[si].1;
-                let bit = (env[u8_i] >> u8_shift) & 1;
-                env12 |= (bit as u16) << si;
-            }
-            env12
-        };
-        let env_0 = collect_env12(&[
-            (TL,7), (TM,0), (TM,1), (TM,2),
-            (ML,7), (MM,0), (MM,1), (MM,2),
-            (BL,7), (BM,0), (BM,1), (BM,2)
-        ]);
-        result |= self.get(env_0) << 0;
-        let env_2 = collect_env12(&[
-            (TM,1), (TM,2), (TM,3), (TM,4),
-            (MM,1), (MM,2), (MM,3), (MM,4),
-            (BM,1), (BM,2), (BM,3), (BM,4)
-        ]);
-        result |= self.get(env_2) << 2;
-        let env_4 = collect_env12(&[
-            (TM,3), (TM,4), (TM,5), (TM,6),
-            (MM,3), (MM,4), (MM,5), (MM,6),
-            (BM,3), (BM,4), (BM,5), (BM,6)
-        ]);
-        result |= self.get(env_4) << 4;
-        let env_6 = collect_env12(&[
-            (TM,5), (TM,6), (TM,7), (TR,0),
-            (MM,5), (MM,6), (MM,7), (MR,0),
-            (BM,5), (BM,6), (BM,7), (BR,0)
-        ]);
-        result |= self.get(env_6) << 6;
-        result
-    }
-}
-
-pub struct Worker<'a> {
-    source: &'a Field,
-    tx: crossbeam::channel::Sender <(usize,Vec<u8>)>,
-    table: &'a Table,
-    n_threads: usize,
-    thread_i: usize,
-}
-impl<'a> Worker<'a> {
-    pub fn play (&mut self) {
-        let source = &self.source;
-        let table = &self.table;
-        let w = source.w;
-        let h = source.h;
-        let w8 = source.w8;
-        let mut data = Vec::<u8>::with_capacity(w8);
-        data.resize(w8, 0);
-        // in case there are bits in each last byte that need to be cleared
-        let mut cutoff = 0_u8;
-        if w%8 != 0 {
-            for ci in w%8 .. 8 {
-                cutoff |= 1 << ci;
-            }
-        }
-        // source field rows
-        let (mut trow, mut mrow, mut brow);
-        // top row
-        let y = 0;
-        if y % self.n_threads == self.thread_i {
-            mrow = &source.data[y*w8..];
-            brow = &source.data[(y+1)*w8..];
-            // top left corner
-            let x8 = 0;
-            data[x8] = table.work_u8(&[
-                0, 0, 0,
-                0, mrow[0], mrow[1],
-                0, brow[0], brow[1]
-            ]);
-            // top stripe
-            for x8 in 1 .. w8-1 {
-                data[x8] = table.work_u8(&[
-                    0, 0, 0,
-                    mrow[x8-1], mrow[x8], mrow[x8+1],
-                    brow[x8-1], brow[x8], brow[x8+1]
-                ]);
-            }
-            // top right corner
-            let x8 = w8-1;
-            data[x8] = table.work_u8(&[
-                0, 0, 0,
-                mrow[w8-2], mrow[w8-1], 0,
-                brow[w8-2], brow[w8-1], 0
-            ]);
-            // top cutoff
-            data[x8] &= !cutoff;
-            // top tx
-            self.tx.send((y,data.clone())).unwrap();
-        }
-        // mid rows
-        for y in 1..h-1 {
-            if y % self.n_threads != self.thread_i {
-                continue;
-            }
-            trow = &source.data[(y-1)*w8..];
-            mrow = &source.data[y*w8..];
-            brow = &source.data[(y+1)*w8..];
-            // left edge
-            let x8 = 0;
-            data[x8] = table.work_u8(&[
-                0, trow[0], trow[1],
-                0, mrow[0], mrow[1],
-                0, brow[0], brow[1]
-            ]);
-            // mid
-            for x8 in 1 .. w8-1 {
-                data[x8] = table.work_u8(&[
-                    trow[x8-1], trow[x8], trow[x8+1],
-                    mrow[x8-1], mrow[x8], mrow[x8+1],
-                    brow[x8-1], brow[x8], brow[x8+1]
-                ]);
-            }
-            // right edge
-            let x8 = w8-1;
-            data[x8] = table.work_u8(&[
-                trow[x8-1], trow[x8], 0,
-                mrow[x8-1], mrow[x8], 0,
-                brow[x8-1], brow[x8], 0
-            ]);
-            // mid cutoff
-            data[x8] &= !cutoff;
-            // mid tx
-            self.tx.send((y,data.clone())).unwrap();
-        }
-        // bottom row
-        let y = h-1;
-        if y % self.n_threads == self.thread_i {
-            trow = &source.data[(y-1)*w8..];
-            mrow = &source.data[y*w8..];
-            // bottom left corner
-            let x8 = 0;
-            data[x8] = table.work_u8(&[
-                0, trow[x8], trow[x8+1],
-                0, mrow[x8], mrow[x8+1],
-                0, 0, 0
-            ]);
-            // bottom stripe
-            for x8 in 1 .. w8-1 {
-                data[x8] = table.work_u8(&[
-                    trow[x8-1], trow[x8], trow[x8+1],
-                    mrow[x8-1], mrow[x8], mrow[x8+1],
-                    0, 0, 0
-                ]);
-            }
-            // bottom right corner
-            let x8 = w8-1;
-            data[x8] = table.work_u8(&[
-                trow[x8-1], trow[x8], 0,
-                mrow[x8-1], trow[x8], 0,
-                0, 0, 0
-            ]);
-            // bottom cutoff
-            data[x8] &= !cutoff;
-            // bottom tx
-            self.tx.send((y,data.clone())).unwrap();
-        }
-    }
 }
 
 pub struct Automata {
@@ -287,11 +119,27 @@ pub struct Automata {
     fields_swapped: bool,
     //optimization
     table: Table,
-    n_threads: usize,
+    clb_source: cl::memory::Buffer<u8>,
+    clb_target: cl::memory::Buffer<u8>,
+    clb_table: cl::memory::Buffer<u8>,
+    cl_command_queue: cl::command_queue::CommandQueue,
+    clk_play: cl::kernel::Kernel,
 }
 
+#[derive(Debug, Clone)]
+pub struct AutomataError {
+    msg: String,
+}
+impl std::fmt::Display for AutomataError {
+    fn fmt (&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.msg)
+    }
+}
+impl std::error::Error for AutomataError {}
+
 impl Automata {
-    pub fn new (w:usize, h:usize, n_threads:usize) -> Automata {
+    pub fn new (w:usize, h:usize, gpu_i:usize) -> Result<Automata, Box<dyn std::error::Error>> {
+        // apply seed.json
         let seed_json = json::parse(
                 & std::fs::read_to_string("seed.json")
                     .expect("Please ChDir to the path with the seed files and prefs.json.")
@@ -313,16 +161,81 @@ impl Automata {
                 survives |= 1 << survive_i;
             }
         }
-        Automata {
+        // table
+        let mut table = Table::new(borns, survives);
+        // (host) fields
+        let (field0, field1) = (Field::new(w,h), Field::new(w,h));
+        // integrate OpenCL
+        let cl_context;
+        let cl_command_queue;
+        let clk_play;
+        let clb_source: cl::memory::Buffer<u8>;
+        let clb_target: cl::memory::Buffer<u8>;
+        let clb_table: cl::memory::Buffer<u8>;
+        {
+            let mut devices = Vec::<cl::types::cl_device_id>::new();
+            for platform in cl::platform::get_platforms().unwrap() {
+                for device in platform.get_devices(cl::device::CL_DEVICE_TYPE_GPU).unwrap() {
+                    devices.push(device);
+                }
+            }
+            if gpu_i >= devices.len() {
+                return Err(Box::new(AutomataError{
+                    msg: "Cannot find a suitable OpenCL device for gpu_i.".to_string()
+                }));
+            }
+            let device = cl::device::Device::new(devices[gpu_i]);
+            cl_context = cl::context::Context::from_device(&device).unwrap();
+            cl_command_queue = cl::command_queue::CommandQueue::create_with_properties(
+                &cl_context,
+                device.id(),
+                0, //properties
+                0 //queue_size
+            ).unwrap();
+            let program = cl::program::Program::create_and_build_from_source(
+                &cl_context,
+                &include_str!("kernels.cl"),
+                "" //options
+            ).unwrap();
+            clk_play = cl::kernel::Kernel::new(
+                cl::kernel::create_kernel(
+                    program.get(),
+                    &std::ffi::CString::new("play").unwrap()
+                ).unwrap()
+            );
+            clb_source = cl::memory::Buffer::create(
+                &cl_context,
+                cl::memory::CL_MEM_READ_WRITE,
+                h * field0.w8,
+                std::ptr::null_mut()
+            ).unwrap();
+            clb_target = cl::memory::Buffer::create(
+                &cl_context,
+                cl::memory::CL_MEM_READ_WRITE,
+                h * field0.w8,
+                std::ptr::null_mut()
+            ).unwrap();
+            clb_table = cl::memory::Buffer::create(
+                &cl_context,
+                cl::memory::CL_MEM_READ_WRITE,
+                table.values.len(),
+                std::ptr::null_mut()
+            ).unwrap();
+        }
+        Ok(Automata {
             w: w,
             h: h,
-            field0: Field::new(w,h),
-            field1: Field::new(w,h),
+            field0: field0,
+            field1: field1,
             fields_swapped: false,
             seed_json: seed_json,
-            table: Table::new(borns, survives),
-            n_threads: n_threads,
-        }
+            table: table,
+            clb_source: clb_source,
+            clb_target: clb_target,
+            clb_table: clb_table,
+            cl_command_queue: cl_command_queue,
+            clk_play: clk_play,
+        })
     }
     // Plays n rounds of Game Of Life or so.
     pub fn play (&mut self, n_rounds: usize) {
@@ -333,40 +246,53 @@ impl Automata {
                 } else {
                     (&self.field0, &mut self.field1)
                 };
+            let w = source.w;
             let h = source.h;
             let w8 = source.w8;
             let table = &self.table;
-            let n_threads = self.n_threads;
-            let (tx, rx):
-                (
-                    crossbeam::channel::Sender <(usize,Vec<u8>)>,
-                    crossbeam::channel::Receiver <(usize,Vec<u8>)>
-                )
-                =
-                    crossbeam::channel::bounded(0);
-            crossbeam::scope(|s| {
-                for thread_i in 0..n_threads {
-                    let tx_clone = tx.clone();
-                    s.spawn(move |_| {
-                        let mut worker = Worker {
-                            source: source,
-                            tx: tx_clone,
-                            table: table,
-                            n_threads: n_threads,
-                            thread_i: thread_i,
-                        };
-                        worker.play();
-                    });
-                }
-                let mut n_collected = 0_usize;
-                for (y, data) in rx {
-                    n_collected += 1;
-                    target.data[y*w8..(y+1)*w8].clone_from_slice(&data[..]);
-                    if n_collected == h {
-                        break;
-                    }
-                }
-            });
+            // prepare OpenCL
+            let cl_command_queue = &self.cl_command_queue;
+            let mut clb_source = &mut self.clb_source;
+            let clb_target = &self.clb_target;
+            let mut clb_table = &mut self.clb_table;
+            let clk_play = &self.clk_play;
+            cl_command_queue.enqueue_write_buffer(
+                &mut clb_source,
+                1, //blocking_write
+                0, //offset
+                &source.data,
+                &[] //event_wait_list
+            ).unwrap();
+            cl_command_queue.enqueue_write_buffer(
+                &mut clb_table,
+                1, //blocking_write
+                0, //offset
+                &table.values,
+                &[] //event_wait_list
+            ).unwrap();
+            clk_play.set_arg(0, &(w as u32)).unwrap();
+            clk_play.set_arg(1, &(h as u32)).unwrap();
+            clk_play.set_arg(2, &clb_source.get()).unwrap();
+            clk_play.set_arg(3, &clb_target.get()).unwrap();
+            clk_play.set_arg(4, &clb_table.get()).unwrap();
+            // go, using OpenCL
+            cl_command_queue.enqueue_nd_range_kernel(
+                clk_play.get(),
+                1, //work_dim; for: y=0, y=1, y=2, ... y=h-1
+                [0].as_ptr(), //global_work_offsets
+                [h].as_ptr(), //global_work_sizes
+                [1].as_ptr(), //local_work_sizes
+                &[] //event_wait_list
+            ).unwrap();
+            // clean up
+            cl_command_queue.enqueue_read_buffer(
+                &clb_target,
+                1, //blocking_read
+                0, //offset
+                &mut target.data,
+                &[] //event_wait_list
+            ).unwrap();
+            self.cl_command_queue.finish().unwrap();
             self.fields_swapped = !self.fields_swapped;
         }
     }
