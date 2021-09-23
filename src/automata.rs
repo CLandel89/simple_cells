@@ -119,8 +119,8 @@ pub struct Automata {
     fields_swapped: bool,
     //optimization
     table: Table,
-    clb_source: cl::memory::Buffer<u8>,
-    clb_target: cl::memory::Buffer<u8>,
+    clb_field0: cl::memory::Buffer<u8>,
+    clb_field1: cl::memory::Buffer<u8>,
     clb_table: cl::memory::Buffer<u8>,
     cl_command_queue: cl::command_queue::CommandQueue,
     clk_play: cl::kernel::Kernel,
@@ -169,9 +169,9 @@ impl Automata {
         let cl_context;
         let cl_command_queue;
         let clk_play;
-        let clb_source: cl::memory::Buffer<u8>;
-        let clb_target: cl::memory::Buffer<u8>;
-        let clb_table: cl::memory::Buffer<u8>;
+        let clb_field0: cl::memory::Buffer<u8>;
+        let clb_field1: cl::memory::Buffer<u8>;
+        let mut clb_table: cl::memory::Buffer<u8>;
         {
             let mut devices = Vec::<cl::types::cl_device_id>::new();
             for platform in cl::platform::get_platforms().unwrap() {
@@ -203,13 +203,13 @@ impl Automata {
                     &std::ffi::CString::new("play").unwrap()
                 ).unwrap()
             );
-            clb_source = cl::memory::Buffer::create(
+            clb_field0 = cl::memory::Buffer::create(
                 &cl_context,
                 cl::memory::CL_MEM_READ_WRITE,
                 h * field0.w8,
                 std::ptr::null_mut()
             ).unwrap();
-            clb_target = cl::memory::Buffer::create(
+            clb_field1 = cl::memory::Buffer::create(
                 &cl_context,
                 cl::memory::CL_MEM_READ_WRITE,
                 h * field0.w8,
@@ -221,48 +221,6 @@ impl Automata {
                 table.values.len(),
                 std::ptr::null_mut()
             ).unwrap();
-        }
-        Ok(Automata {
-            w: w,
-            h: h,
-            field0: field0,
-            field1: field1,
-            fields_swapped: false,
-            seed_json: seed_json,
-            table: table,
-            clb_source: clb_source,
-            clb_target: clb_target,
-            clb_table: clb_table,
-            cl_command_queue: cl_command_queue,
-            clk_play: clk_play,
-        })
-    }
-    // Plays n rounds of Game Of Life or so.
-    pub fn play (&mut self, n_rounds: usize) {
-        for _ in 0..n_rounds {
-            let (source, target) =
-                if self.fields_swapped {
-                    (&self.field1, &mut self.field0)
-                } else {
-                    (&self.field0, &mut self.field1)
-                };
-            let w = source.w;
-            let h = source.h;
-            let w8 = source.w8;
-            let table = &self.table;
-            // prepare OpenCL
-            let cl_command_queue = &self.cl_command_queue;
-            let mut clb_source = &mut self.clb_source;
-            let clb_target = &self.clb_target;
-            let mut clb_table = &mut self.clb_table;
-            let clk_play = &self.clk_play;
-            cl_command_queue.enqueue_write_buffer(
-                &mut clb_source,
-                1, //blocking_write
-                0, //offset
-                &source.data,
-                &[] //event_wait_list
-            ).unwrap();
             cl_command_queue.enqueue_write_buffer(
                 &mut clb_table,
                 1, //blocking_write
@@ -272,9 +230,64 @@ impl Automata {
             ).unwrap();
             clk_play.set_arg(0, &(w as u32)).unwrap();
             clk_play.set_arg(1, &(h as u32)).unwrap();
+            // 2 (source) set in loop
+            // 3 (target) set in loop
+            clk_play.set_arg(4, &clb_table.get()).unwrap();
+        }
+        Ok(Automata {
+            w: w,
+            h: h,
+            field0: field0,
+            field1: field1,
+            fields_swapped: false,
+            seed_json: seed_json,
+            table: table,
+            clb_field0: clb_field0,
+            clb_field1: clb_field1,
+            clb_table: clb_table,
+            cl_command_queue: cl_command_queue,
+            clk_play: clk_play,
+        })
+    }
+    // Plays n rounds of Game Of Life or so.
+    pub fn play (&mut self, n_rounds: usize) {
+        let (source, target) =
+            if self.fields_swapped {
+                (&self.field1, &mut self.field0)
+            } else {
+                (&self.field0, &mut self.field1)
+            };
+        let w = source.w;
+        let h = source.h;
+        let w8 = source.w8;
+        let table = &self.table;
+        // prepare OpenCL
+        let cl_command_queue = &self.cl_command_queue;
+        let (mut clb_source, mut clb_target) =
+            if self.fields_swapped {
+                (&mut self.clb_field1, &mut self.clb_field0)
+            } else {
+                (&mut self.clb_field0, &mut self.clb_field1)
+            };
+        let mut clb_table = &mut self.clb_table;
+        let clk_play = &self.clk_play;
+        cl_command_queue.enqueue_write_buffer(
+            &mut clb_source,
+            1, //blocking_write
+            0, //offset
+            &source.data,
+            &[] //event_wait_list
+        ).unwrap();
+        for _ in 0..n_rounds {
+            if self.fields_swapped {
+                clb_source = &mut self.clb_field1;
+                clb_target = &mut self.clb_field0;
+            } else {
+                clb_source = &mut self.clb_field0;
+                clb_target = &mut self.clb_field1;
+            }
             clk_play.set_arg(2, &clb_source.get()).unwrap();
             clk_play.set_arg(3, &clb_target.get()).unwrap();
-            clk_play.set_arg(4, &clb_table.get()).unwrap();
             // go, using OpenCL
             cl_command_queue.enqueue_nd_range_kernel(
                 clk_play.get(),
@@ -285,16 +298,23 @@ impl Automata {
                 &[] //event_wait_list
             ).unwrap();
             // clean up
-            cl_command_queue.enqueue_read_buffer(
-                &clb_target,
-                1, //blocking_read
-                0, //offset
-                &mut target.data,
-                &[] //event_wait_list
-            ).unwrap();
             self.cl_command_queue.finish().unwrap();
             self.fields_swapped = !self.fields_swapped;
         }
+        // declare source again, the "swapped" property might have changed
+        let source =
+            if self.fields_swapped {
+                &mut self.field1
+            } else {
+                &mut self.field0
+            };
+        cl_command_queue.enqueue_read_buffer(
+            &clb_target,
+            1, //blocking_read
+            0, //offset
+            &mut source.data,
+            &[] //event_wait_list
+        ).unwrap();
     }
     pub fn get (&self, x:usize, y:usize) -> bool {
         let field = if self.fields_swapped { &self.field1 } else { &self.field0 };
