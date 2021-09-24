@@ -1,6 +1,8 @@
 extern crate opencl3 as cl;
 use automata::cl::memory::ClMem;
 
+use window;
+
 pub struct Field {
     data: Vec<u8>,
     pub w: usize,
@@ -138,7 +140,7 @@ impl std::fmt::Display for AutomataError {
 impl std::error::Error for AutomataError {}
 
 impl Automata {
-    pub fn new (w:usize, h:usize, gpu_i:usize) -> Result<Automata, Box<dyn std::error::Error>> {
+    pub fn new (window: &window::Window, gpu_i:usize) -> Result<Automata, Box<dyn std::error::Error>> {
         // apply seed.json
         let seed_json = json::parse(
                 & std::fs::read_to_string("seed.json")
@@ -163,6 +165,8 @@ impl Automata {
         }
         // table
         let mut table = Table::new(borns, survives);
+        // read seed.png
+        let ((w,h),seed) = window.seed_png();
         // (host) fields
         let (field0, field1) = (Field::new(w,h), Field::new(w,h));
         // integrate OpenCL
@@ -234,7 +238,8 @@ impl Automata {
             // 3 (target) set in loop
             clk_play.set_arg(4, &clb_table.get()).unwrap();
         }
-        Ok(Automata {
+        // create new object
+        let mut new = Automata {
             w: w,
             h: h,
             field0: field0,
@@ -247,7 +252,17 @@ impl Automata {
             clb_table: clb_table,
             cl_command_queue: cl_command_queue,
             clk_play: clk_play,
-        })
+        };
+        // apply seed.png
+        for y in 0..h {
+            let row = &seed[y];
+            for x in 0..w {
+                let v = (row[x/8] >> (x%8)) & 1 != 0;
+                new.set(x, y, v);
+            }
+        }
+        // all set => return
+        Ok(new)
     }
     // Plays n rounds of Game Of Life or so.
     pub fn play (&mut self, n_rounds: usize) {
