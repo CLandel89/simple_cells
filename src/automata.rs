@@ -126,6 +126,7 @@ pub struct Automata {
     pub h: usize,
     pub field: Field,
     //optimization
+    #[allow(dead_code)] cl_context: cl::context::Context,
     fields_swapped: bool,
     clb_field0: cl::memory::Buffer<u8>,
     clb_field1: cl::memory::Buffer<u8>,
@@ -257,6 +258,7 @@ impl Automata
             w: w,
             h: h,
             field: field,
+            cl_context: cl_context,
             fields_swapped: false,
             clb_field0: clb_field0,
             clb_field1: clb_field1,
