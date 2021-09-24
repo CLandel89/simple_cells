@@ -3,13 +3,20 @@ use automata::cl::memory::ClMem;
 
 use window;
 
+
+/*
+The "field" is a chunk of data where all cells of the game reside.
+*/
+
 pub struct Field {
     data: Vec<u8>,
     pub w: usize,
     pub h: usize,
     pub w8: usize,
 }
-impl Field {
+
+impl Field
+{
     pub fn new (w:usize, h:usize) -> Field {
         let w8 = ((w as f64) / 8_f64).ceil() as usize;
         let mut data: Vec<u8> = Vec::with_capacity(h*w8);
@@ -21,11 +28,13 @@ impl Field {
             w8: w8,
         }
     }
+
     pub fn get (&self, x:usize, y:usize) -> bool {
         let di = y*self.w8 + x/8;
         let d = self.data[di];
         ((d >> (x%8)) & 1) != 0
     }
+
     pub fn set (&mut self, x:usize, y:usize, v:bool) {
         let v8 = (v as u8) << (x%8);
         let di = y*self.w8 + x/8;
@@ -36,21 +45,20 @@ impl Field {
     }
 }
 
-// These indices are for 3×3 surrounding environments.
-const TL:usize=0; const TM:usize=1; const TR:usize=2;
-const ML:usize=3; const MM:usize=4; const MR:usize=5;
-const BL:usize=6; const BM:usize=7; const BR:usize=8;
-
 /*
 The "table" is the storage for all 2×1 results of 4×3 field slices.
 There are 2^(4×­3)=4096 2-bit lookup values. A u8 can hold 4 such values.
 TODO: Document how and why.
 */
+
 pub struct Table {
     values: [u8; 4096/4],
 }
-impl Table {
-    pub fn new (borns: u16, survives: u16) -> Self {
+
+impl Table
+{
+    pub fn new (borns: u16, survives: u16) -> Self
+    {
         let mut new = Self {
             values: [0; 4096/4],
         };
@@ -93,12 +101,14 @@ impl Table {
         }
         new
     }
+    /*
     fn get (&self, env: u16) -> u8 {
         //get the u8 with the entry and 1 other entry
         let d = self.values[env as usize / 4];
         //shift the entry to the LSB and clear any MSB past 2 bits
-        ((d >> ((env%4)*2)) & 3)
+        (d >> ((env%4)*2)) & 3
     }
+    */
     fn set (&mut self, env: u16, value: u8) {
         //get the u8 with the entry and 1 other entry
         let mut d = self.values[env as usize / 4];
@@ -112,7 +122,6 @@ impl Table {
 }
 
 pub struct Automata {
-    seed_json: json::JsonValue,
     pub w: usize,
     pub h: usize,
     //these work like a double buffer
@@ -120,10 +129,9 @@ pub struct Automata {
     field1: Field,
     fields_swapped: bool,
     //optimization
-    table: Table,
     clb_field0: cl::memory::Buffer<u8>,
     clb_field1: cl::memory::Buffer<u8>,
-    clb_table: cl::memory::Buffer<u8>,
+    #[allow(dead_code)] clb_table: cl::memory::Buffer<u8>,
     cl_command_queue: cl::command_queue::CommandQueue,
     clk_play: cl::kernel::Kernel,
 }
@@ -139,9 +147,14 @@ impl std::fmt::Display for AutomataError {
 }
 impl std::error::Error for AutomataError {}
 
-impl Automata {
-    pub fn new (window: &window::Window, gpu_i:usize) -> Result<Automata, Box<dyn std::error::Error>> {
-        // apply seed.json
+impl Automata
+{
+    pub fn new (
+            window: &window::Window,
+            gpu_i:usize
+    ) -> Result<Automata, Box<dyn std::error::Error>>
+    {
+        // seed.json
         let seed_json = json::parse(
                 & std::fs::read_to_string("seed.json")
                     .expect("Please ChDir to the path with the seed files and prefs.json.")
@@ -163,12 +176,14 @@ impl Automata {
                 survives |= 1 << survive_i;
             }
         }
-        // table
-        let mut table = Table::new(borns, survives);
-        // read seed.png
+
+        // seed.png
         let ((w,h),seed) = window.seed_png();
-        // (host) fields
+    
+        // table, (host) fields
         let (field0, field1) = (Field::new(w,h), Field::new(w,h));
+        let table = Table::new(borns, survives);
+
         // integrate OpenCL
         let cl_context;
         let cl_command_queue;
@@ -238,6 +253,7 @@ impl Automata {
             // 3 (target) set in loop
             clk_play.set_arg(4, &clb_table.get()).unwrap();
         }
+
         // create new object
         let mut new = Automata {
             w: w,
@@ -245,14 +261,13 @@ impl Automata {
             field0: field0,
             field1: field1,
             fields_swapped: false,
-            seed_json: seed_json,
-            table: table,
             clb_field0: clb_field0,
             clb_field1: clb_field1,
             clb_table: clb_table,
             cl_command_queue: cl_command_queue,
             clk_play: clk_play,
         };
+
         // apply seed.png
         for y in 0..h {
             let row = &seed[y];
@@ -261,30 +276,31 @@ impl Automata {
                 new.set(x, y, v);
             }
         }
+
         // all set => return
         Ok(new)
     }
+
     // Plays n rounds of Game Of Life or so.
-    pub fn play (&mut self, n_rounds: usize) {
-        let (source, target) =
-            if self.fields_swapped {
-                (&self.field1, &mut self.field0)
-            } else {
-                (&self.field0, &mut self.field1)
-            };
-        let w = source.w;
-        let h = source.h;
-        let w8 = source.w8;
-        let table = &self.table;
+    pub fn play (&mut self, n_rounds: usize)
+    {
+        let source;
+        if self.fields_swapped {
+            source = &self.field1;
+        } else {
+            source = &self.field0;
+        }
+    
         // prepare OpenCL
         let cl_command_queue = &self.cl_command_queue;
-        let (mut clb_source, mut clb_target) =
-            if self.fields_swapped {
-                (&mut self.clb_field1, &mut self.clb_field0)
-            } else {
-                (&mut self.clb_field0, &mut self.clb_field1)
-            };
-        let mut clb_table = &mut self.clb_table;
+        let (mut clb_source, mut clb_target);
+        if self.fields_swapped {
+            clb_source = &mut self.clb_field1;
+            clb_target = &mut self.clb_field0;
+        } else {
+            clb_source = &mut self.clb_field0;
+            clb_target = &mut self.clb_field1;
+        }
         let clk_play = &self.clk_play;
         cl_command_queue.enqueue_write_buffer(
             &mut clb_source,
@@ -293,6 +309,8 @@ impl Automata {
             &source.data,
             &[] //event_wait_list
         ).unwrap();
+
+        // go
         for _ in 0..n_rounds {
             if self.fields_swapped {
                 clb_source = &mut self.clb_field1;
@@ -308,7 +326,7 @@ impl Automata {
                 clk_play.get(),
                 1, //work_dim; for: y=0, y=1, y=2, ... y=h-1
                 [0].as_ptr(), //global_work_offsets
-                [h].as_ptr(), //global_work_sizes
+                [self.h].as_ptr(), //global_work_sizes
                 [1].as_ptr(), //local_work_sizes
                 &[] //event_wait_list
             ).unwrap();
@@ -316,13 +334,14 @@ impl Automata {
             self.cl_command_queue.finish().unwrap();
             self.fields_swapped = !self.fields_swapped;
         }
-        // declare source again, the "swapped" property might have changed
-        let source =
-            if self.fields_swapped {
-                &mut self.field1
-            } else {
-                &mut self.field0
-            };
+
+        // read the results from the GPU
+        let source;
+        if self.fields_swapped {
+            source = &mut self.field1;
+        } else {
+            source = &mut self.field0;
+        }
         cl_command_queue.enqueue_read_buffer(
             &clb_target,
             1, //blocking_read
@@ -331,10 +350,12 @@ impl Automata {
             &[] //event_wait_list
         ).unwrap();
     }
+
     pub fn get (&self, x:usize, y:usize) -> bool {
         let field = if self.fields_swapped { &self.field1 } else { &self.field0 };
         field.get(x,y)
     }
+
     pub fn set (&mut self, x:usize, y:usize, v:bool) {
         let field = if self.fields_swapped { &mut self.field1 } else { &mut self.field0 };
         field.set(x,y,v);
