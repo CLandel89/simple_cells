@@ -40,6 +40,7 @@ fn main ()
     }
     let mut snapshot_counter = 0_f64;
     let mut snapshot_trigger = false;
+    let mut snapshot_restore_rpf = 1_f64;
 
     loop
     {
@@ -52,6 +53,7 @@ fn main ()
         if snapshots > 0 {
             if snapshot_counter+rpf >= snapshots as f64 {
                 snapshot_trigger = true;
+                snapshot_restore_rpf = rpf;
                 rpf = snapshots as f64 - snapshot_counter;
             }
         }
@@ -59,6 +61,7 @@ fn main ()
         automata.play(rpf as usize);
         n += rpf as usize;
         snapshot_counter += rpf as usize as f64;
+        r_counter += rpf as isize;
 
         if snapshot_trigger {
             window.snapshot_png(
@@ -67,16 +70,16 @@ fn main ()
             );
             snapshot_trigger = false;
             snapshot_counter = 0.0;
+            rpf = snapshot_restore_rpf;
         }
 
-        r_counter += rpf as isize;
         let elapsed = t_counter.elapsed();
         if f_counter == 16 || elapsed >= second {
             t_counter = Instant::now();
             let dur = (elapsed.as_millis() as f64) / 1000.0;
             let rps = (r_counter as f64) / dur;
             let rpf_new = rps / fps;
-            rpf = (3.0*rpf + rpf_new) / 4.0;
+            rpf = (7.0*rpf + rpf_new) / 8.0;
             if rpf < 1.0 {
                 rpf = 1.0;
             }
