@@ -2,5 +2,6 @@
     "window_w": 512,
     "window_h": 512,
     "fps": 10,
-    "gpu_i": 0
+    "gpu_i": 0,
+    "snapshots": 1024
 }

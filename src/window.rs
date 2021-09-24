@@ -7,6 +7,9 @@ use sdl2::rect::Point;
 use sdl2::rect::Rect;
 use sdl2::render::Canvas;
 use sdl2::image::Sdl2ImageContext;
+use sdl2::image::SaveSurface;
+
+use automata;
 
 pub struct Window {
     sdl_context: Sdl,
@@ -82,5 +85,28 @@ impl Window {
     }
     fn exit_issued (&self) -> bool {
         return self.exit_issued;
+    }
+    pub fn snapshot_png (&self, automata: &automata::Automata, path: &str) {
+        let (w, h) = (automata.w, automata.h);
+        let surf = Surface::new(
+            w as u32,
+            h as u32,
+            sdl2::pixels::PixelFormatEnum::RGB332 //1 byte per pixel
+        ).unwrap();
+        let pitch = surf.pitch();
+        unsafe {
+            let pixels = (*surf.raw()).pixels as *mut u8;
+            for y in 0..h {
+                for x in 0..w {
+                    let pixel_i = (y*(pitch as usize) + x) as isize;
+                    if automata.get(x,y) {
+                        *pixels.offset(pixel_i) = 0;
+                    } else {
+                        *pixels.offset(pixel_i) = 255;
+                    }
+                }
+            }
+        }
+        surf.save(path).unwrap();
     }
 }
