@@ -251,6 +251,7 @@ impl Automata
             // 2 (source) set in loop
             // 3 (target) set in loop
             clk_play.set_arg(4, &clb_table.get()).unwrap();
+            clk_play.set_arg_local_buffer(5, 3*field.w8).unwrap();
         }
 
         // create new object
