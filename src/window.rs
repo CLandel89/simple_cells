@@ -39,18 +39,29 @@ impl Window {
             exit_issued: false,
         }
     }
-    pub fn fill (&mut self, r:u8, g:u8, b:u8) {
-        self.set_draw_color(r, g, b);
-        let (w,h) = self.sdl_canvas.output_size().unwrap();
-        self.sdl_canvas.fill_rect(Rect::new(0,0,w,h));
-    }
-    pub fn set_draw_color (&mut self, r:u8, g:u8, b:u8) {
-        self.sdl_canvas.set_draw_color(Color::RGB(r,g,b));
-    }
-    pub fn draw_point (&mut self, x:usize, y:usize) {
-        self.sdl_canvas.draw_point(Point::new(x as i32, y as i32));
-    }
-    pub fn present (&mut self) {
+    pub fn present (&mut self, automata: &automata::Automata) {
+        let (win_w, win_h) = self.sdl_canvas.output_size().unwrap();
+        let (w, h) = (automata.w, automata.h);
+        let win_w_by_x = (w as f64) / (win_w as f64);
+        let win_h_by_y = (h as f64) / (win_h as f64);
+        self.sdl_canvas.set_draw_color(Color::RGB(0,0,0));
+        self.sdl_canvas.fill_rect(Rect::new(0,0,win_w,win_h));
+        self.sdl_canvas.set_draw_color(Color::RGB(255,255,255));
+        for wy in 0..win_h {
+            for wx in 0..win_w {
+                let x = (wx as f64 * win_w_by_x).round() as usize;
+                let y = (wy as f64 * win_h_by_y).round() as usize;
+                if (x >= automata.w) {
+                    continue;
+                }
+                if (y >= automata.h) {
+                    continue;
+                }
+                if automata.get(x, y) {
+                    self.sdl_canvas.draw_point(Point::new(wx as i32, wy as i32));
+                }
+            }
+        }
         self.sdl_canvas.present();
         // Exit issued? This is a variant of the SDL2 Rust binding example: https://docs.rs/sdl2/0.34.5/sdl2/index.html
         let mut event_pump = self.sdl_context.event_pump().unwrap();
