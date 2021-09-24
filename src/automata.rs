@@ -124,11 +124,9 @@ impl Table
 pub struct Automata {
     pub w: usize,
     pub h: usize,
-    //these work like a double buffer
-    pub field0: Field,
-    field1: Field,
-    fields_swapped: bool,
+    pub field: Field,
     //optimization
+    fields_swapped: bool,
     clb_field0: cl::memory::Buffer<u8>,
     clb_field1: cl::memory::Buffer<u8>,
     #[allow(dead_code)] clb_table: cl::memory::Buffer<u8>,
@@ -180,8 +178,8 @@ impl Automata
         // seed.png
         let ((w,h),seed) = window.seed_png();
     
-        // table, (host) fields
-        let (field0, field1) = (Field::new(w,h), Field::new(w,h));
+        // table, (host) field
+        let field = Field::new(w,h);
         let table = Table::new(borns, survives);
 
         // integrate OpenCL
@@ -225,13 +223,13 @@ impl Automata
             clb_field0 = cl::memory::Buffer::create(
                 &cl_context,
                 cl::memory::CL_MEM_READ_WRITE,
-                h * field0.w8,
+                h * field.w8,
                 std::ptr::null_mut()
             ).unwrap();
             clb_field1 = cl::memory::Buffer::create(
                 &cl_context,
                 cl::memory::CL_MEM_READ_WRITE,
-                h * field0.w8,
+                h * field.w8,
                 std::ptr::null_mut()
             ).unwrap();
             clb_table = cl::memory::Buffer::create(
@@ -258,8 +256,7 @@ impl Automata
         let mut new = Automata {
             w: w,
             h: h,
-            field0: field0,
-            field1: field1,
+            field: field,
             fields_swapped: false,
             clb_field0: clb_field0,
             clb_field1: clb_field1,
@@ -284,13 +281,6 @@ impl Automata
     // Plays n rounds of Game Of Life or so.
     pub fn play (&mut self, n_rounds: usize)
     {
-        let source;
-        if self.fields_swapped {
-            source = &self.field1;
-        } else {
-            source = &self.field0;
-        }
-    
         // prepare OpenCL
         let cl_command_queue = &self.cl_command_queue;
         let (mut clb_source, mut clb_target);
@@ -306,7 +296,7 @@ impl Automata
             &mut clb_source,
             1, //blocking_write
             0, //offset
-            &source.data,
+            &self.field.data,
             &[] //event_wait_list
         ).unwrap();
 
@@ -336,28 +326,20 @@ impl Automata
         }
 
         // read the results from the GPU
-        let source;
-        if self.fields_swapped {
-            source = &mut self.field1;
-        } else {
-            source = &mut self.field0;
-        }
         cl_command_queue.enqueue_read_buffer(
             &clb_target,
             1, //blocking_read
             0, //offset
-            &mut source.data,
+            &mut self.field.data,
             &[] //event_wait_list
         ).unwrap();
     }
 
     pub fn get (&self, x:usize, y:usize) -> bool {
-        let field = if self.fields_swapped { &self.field1 } else { &self.field0 };
-        field.get(x,y)
+        self.field.get(x,y)
     }
 
     pub fn set (&mut self, x:usize, y:usize, v:bool) {
-        let field = if self.fields_swapped { &mut self.field1 } else { &mut self.field0 };
-        field.set(x,y,v);
+        self.field.set(x,y,v);
     }
 }
