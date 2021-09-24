@@ -111,8 +111,8 @@ impl Table {
 
 pub struct Automata {
     seed_json: json::JsonValue,
-    w: usize,
-    h: usize,
+    pub w: usize,
+    pub h: usize,
     //these work like a double buffer
     pub field0: Field,
     field1: Field,
