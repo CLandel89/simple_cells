@@ -43,7 +43,8 @@ __kernel void play (
         uint h,
         __global uchar *source,
         __global uchar *target,
-        __constant uchar *table
+        __constant uchar *table,
+        __local uchar *source_buf
 )
 {
     int y = get_global_id(0);
@@ -54,98 +55,59 @@ __kernel void play (
         for (int ci=w%8; ci<8; ci++)
             cutoff |= 1 << ci;
     }
-    // source and target field operations ("t","m","b": top, mid and bottom rows)
-    #define gt(x8) source[(y-1)*w8 + x8]
-    #define gm(x8) source[y*w8 + x8]
-    #define gb(x8) source[(y+1)*w8 + x8]
-    #define sm(x8, v) target[y*w8 + x8] = v
-    // top row
+    // fill the source buffer
     if (y == 0) {
-        // top left corner
-        sm(0, work_byte(
-            0, 0, 0,
-            0, gm(0), gm(1),
-            0, gb(0), gb(1),
-            table
-        ));
-        // top stripe
-        for (size_t x8=1; x8<w8-1; x8++) {
-            sm(x8, work_byte(
-                0, 0, 0,
-                gm(x8-1), gm(x8), gm(x8+1),
-                gb(x8-1), gb(x8), gb(x8+1),
-                table
-            ));
+        for (size_t x8=0*w8; x8<1*w8; x8++) {
+            source_buf[x8] = 0;
         }
-        // top right corner
-        sm(
-            w8 - 1,
-            work_byte(
-                0, 0, 0,
-                gm(w8-2), gm(w8-1), 0,
-                gb(w8-2), gb(w8-1), 0,
-                table
-            ) & ~cutoff
-        );
+        for (size_t x8=1*w8; x8<3*w8; x8++) {
+            source_buf[x8] = source[(y-1)*w8 + x8];
+        }
     }
-    // mid row
     else if (y < h-1) {
-        // left edge
-        sm(0, work_byte(
-            0, gt(0), gt(1),
-            0, gm(0), gm(1),
-            0, gb(0), gb(1),
-            table
-        ));
-        // mid
-        for (size_t x8=1; x8<w8-1; x8++) {
-            sm(x8, work_byte(
-                gt(x8-1), gt(x8), gt(x8+1),
-                gm(x8-1), gm(x8), gm(x8+1),
-                gb(x8-1), gb(x8), gb(x8+1),
-                table
-            ));
+        for (size_t x8=0*w8; x8<3*w8; x8++) {
+            source_buf[x8] = source[(y-1)*w8 + x8];
         }
-        // right edge
-        sm(
-            w8 - 1,
-            work_byte(
-                gt(w8-2), gt(w8-1), 0,
-                gm(w8-2), gm(w8-1), 0,
-                gb(w8-2), gb(w8-1), 0,
-                table
-            ) & ~cutoff
-        );
     }
-    // bottom row
     else /*y == h-1*/ {
-        // bottom left corner
-        sm(0, work_byte(
-            0, gt(0), gt(1),
-            0, gm(0), gm(1),
-            0, 0, 0,
+        for (size_t x8=0*w8; x8<2*w8; x8++) {
+            source_buf[x8] = source[(y-1)*w8 + x8];
+        }
+        for (size_t x8=2*w8; x8<3*w8; x8++) {
+            source_buf[x8] = 0;
+        }
+    }
+    // source and target field operations ("t","m","b": top, mid and bottom rows)
+    #define gt(x8) source_buf[x8]
+    #define gm(x8) source_buf[w8 + x8]
+    #define gb(x8) source_buf[2*w8 + x8]
+    #define sm(x8, v) target[y*w8 + x8] = v
+    // left edge
+    sm(0, work_byte(
+        0, gt(0), gt(1),
+        0, gm(0), gm(1),
+        0, gb(0), gb(1),
+        table
+    ));
+    // mid
+    for (size_t x8=1; x8<w8-1; x8++) {
+        sm(x8, work_byte(
+            gt(x8-1), gt(x8), gt(x8+1),
+            gm(x8-1), gm(x8), gm(x8+1),
+            gb(x8-1), gb(x8), gb(x8+1),
             table
         ));
-        // bottom stripe
-        for (size_t x8=1; x8<w8-1; x8++) {
-            sm(x8, work_byte(
-                gt(x8-1), gt(x8), gt(x8+1),
-                gm(x8-1), gm(x8), gm(x8+1),
-                0, 0, 0,
-                table
-            ));
-        }
-        // bottom right corner
-        sm(
-            w8 - 1,
-            work_byte(
-                gt(w8-2), gt(w8-1), 0,
-                gm(w8-2), gm(w8-1), 0,
-                0, 0, 0,
-                table
-            ) & ~cutoff
-        );
     }
+    // right edge
+    sm(
+        w8 - 1,
+        work_byte(
+            gt(w8-2), gt(w8-1), 0,
+            gm(w8-2), gm(w8-1), 0,
+            gb(w8-2), gb(w8-1), 0,
+            table
+        ) & ~cutoff
+    );
     #undef gt
     #undef gm
     #undef gb
