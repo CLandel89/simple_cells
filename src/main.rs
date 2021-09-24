@@ -16,27 +16,11 @@ fn main () {
     let win_w = prefs_json["window_w"].as_usize().unwrap();
     let win_h = prefs_json["window_h"].as_usize().unwrap();
     let mut window = window::Window::new(&prefs_json);
-    let (win_w_by_x, win_h_by_y);
-    let mut automata;
-    let (w, h);
-    {
-        let seed;
-        let seed_tuple = window.seed_png(); // ((x,y),seed)
-        w = seed_tuple.0.0;
-        h = seed_tuple.0.1;
-        seed = seed_tuple.1;
-        win_w_by_x = (w as f64) / (win_w as f64);
-        win_h_by_y = (h as f64) / (win_h as f64);
-        let gpu_i = prefs_json["gpu_i"].as_usize().unwrap();
-        automata = automata::Automata::new(w, h, gpu_i).unwrap();
-        for y in 0..h {
-            let row = &seed[y];
-            for x in 0..w {
-                let v = (row[x/8] >> (x%8)) & 1 != 0;
-                automata.set(x, y, v);
-            }
-        }
-    }
+    let gpu_i = prefs_json["gpu_i"].as_usize().unwrap();
+    let mut automata = automata::Automata::new(&window, gpu_i).unwrap();
+    let (w, h) = (automata.w, automata.h);
+    let win_w_by_x = (w as f64) / (win_w as f64);
+    let win_h_by_y = (h as f64) / (win_h as f64);
     let mut n = 0_usize;
     let mut rpf = 1_f64; //playing rounds per frame
     let mut t_counter = Instant::now();
