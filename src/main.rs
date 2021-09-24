@@ -18,9 +18,6 @@ fn main () {
     let mut window = window::Window::new(&prefs_json);
     let gpu_i = prefs_json["gpu_i"].as_usize().unwrap();
     let mut automata = automata::Automata::new(&window, gpu_i).unwrap();
-    let (w, h) = (automata.w, automata.h);
-    let win_w_by_x = (w as f64) / (win_w as f64);
-    let win_h_by_y = (h as f64) / (win_h as f64);
     let mut n = 0_usize;
     let mut rpf = 1_f64; //playing rounds per frame
     let mut t_counter = Instant::now();
@@ -46,24 +43,7 @@ fn main () {
     let mut snapshot_counter = 0_f64;
     let mut snapshot_trigger = false;
     loop {
-        window.fill(0,0,0);
-        window.set_draw_color(255,255,255);
-        for wy in 0..win_h {
-            for wx in 0..win_w {
-                let x = (wx as f64 * win_w_by_x).round() as usize;
-                let y = (wy as f64 * win_h_by_y).round() as usize;
-                if (x >= automata.field0.w) {
-                    continue;
-                }
-                if (y >= automata.field0.h) {
-                    continue;
-                }
-                if automata.get(x, y) {
-                    window.draw_point(wx, wy);
-                }
-            }
-        }
-        window.present();
+        window.present(&automata);
         f_counter += 1;
         if window.exit_issued {
             break;
