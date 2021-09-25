@@ -48,7 +48,7 @@ fn main ()
     let mut snapshot_trigger = false;
     let mut snapshot_restore_rpf = 1_f64;
     let benchmark_print = prefs_json["benchmark_print"].as_f64().unwrap();
-    let mut benchmark_n = n;
+    let mut benchmark_counter = 0;
     let mut benchmark_t = Instant::now();
 
     loop
@@ -71,7 +71,7 @@ fn main ()
         n += rpf as usize;
         snapshot_counter += rpf as usize as f64;
         r_counter += rpf as isize;
-        benchmark_n += rpf as usize;
+        benchmark_counter += rpf as usize;
 
         if snapshot_trigger {
             window.snapshot_png(
@@ -101,11 +101,11 @@ fn main ()
             let elapsed = benchmark_t.elapsed().as_millis() as f64 / 1000.0;
             if elapsed >= benchmark_print {
                 utils::benchmark_print(
-                    (benchmark_n*w*h) as f64,
+                    (benchmark_counter*w*h) as f64,
                     elapsed
                 );
                 benchmark_t = Instant::now();
-                benchmark_n = 0;
+                benchmark_counter = 0;
             }
         }
 
