@@ -2,6 +2,7 @@ extern crate chrono;
 extern crate sdl2;
 
 mod automata;
+mod utils;
 mod window;
 
 use std::time::Duration;
@@ -17,6 +18,7 @@ fn main ()
     let mut window = window::Window::new(&prefs_json);
     let gpu_i = prefs_json["gpu_i"].as_usize().unwrap();
     let mut automata = automata::Automata::new(&window, gpu_i).unwrap();
+    let (w, h) = (automata.w, automata.h);
     let mut n = 0_usize;
     let mut rpf = 1_f64; //playing rounds per frame
     let mut t_counter = Instant::now();
@@ -41,6 +43,9 @@ fn main ()
     let mut snapshot_counter = 0_f64;
     let mut snapshot_trigger = false;
     let mut snapshot_restore_rpf = 1_f64;
+    let benchmark_print = prefs_json["benchmark_print"].as_f64().unwrap();
+    let mut benchmark_n = n;
+    let mut benchmark_t = Instant::now();
 
     loop
     {
@@ -62,6 +67,7 @@ fn main ()
         n += rpf as usize;
         snapshot_counter += rpf as usize as f64;
         r_counter += rpf as isize;
+        benchmark_n += rpf as usize;
 
         if snapshot_trigger {
             window.snapshot_png(
@@ -86,6 +92,19 @@ fn main ()
             f_counter = 0;
             r_counter = 0;
         }
+
+        if benchmark_print > 0.0 {
+            let elapsed = benchmark_t.elapsed().as_millis() as f64 / 1000.0;
+            if elapsed >= benchmark_print {
+                utils::benchmark_print(
+                    (benchmark_n*w*h) as f64,
+                    elapsed
+                );
+                benchmark_t = Instant::now();
+                benchmark_n = 0;
+            }
+        }
+
     }
 
 }

@@ -3,5 +3,6 @@
     "window_h": 512,
     "fps": 10,
     "gpu_i": 0,
-    "snapshots": 1024
+    "snapshots": 1024,
+    "benchmark_print": 10.0
 }
