@@ -1,4 +1,5 @@
 extern crate opencl3 as cl;
+extern crate json;
 use automata::cl::memory::ClMem;
 
 use window;
@@ -150,14 +151,11 @@ impl Automata
 {
     pub fn new (
             window: &window::Window,
-            gpu_i:usize
+            gpu_i: usize,
+            seed_json: &json::JsonValue,
     ) -> Result<Automata, Box<dyn std::error::Error>>
     {
         // seed.json
-        let seed_json = json::parse(
-                & std::fs::read_to_string("seed.json")
-                    .expect("Please ChDir to the path with the seed files and prefs.json.")
-            ).unwrap();
         let mut borns = 0u16;
         let mut survives = 0u16;
         {

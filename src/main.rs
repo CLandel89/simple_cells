@@ -15,11 +15,15 @@ fn main ()
             & std::fs::read_to_string("prefs.json")
                 .expect("Please ChDir to the path with the seed files and prefs.json.")
         ).unwrap();
+    let seed_json = json::parse(
+            & std::fs::read_to_string("seed.json")
+                .expect("Please ChDir to the path with the seed files and prefs.json.")
+        ).unwrap();
     let mut window = window::Window::new(&prefs_json);
     let gpu_i = prefs_json["gpu_i"].as_usize().unwrap();
-    let mut automata = automata::Automata::new(&window, gpu_i).unwrap();
+    let mut automata = automata::Automata::new(&window, gpu_i, &seed_json).unwrap();
     let (w, h) = (automata.w, automata.h);
-    let mut n = 0_usize;
+    let mut n = seed_json["n"].as_usize().unwrap();
     let mut rpf = 1_f64; //playing rounds per frame
     let mut t_counter = Instant::now();
     let mut f_counter = 0_usize;
@@ -37,7 +41,7 @@ fn main ()
         ).unwrap();
         std::fs::copy(
             "seed.png",
-            &format!("{}/00000000000000000000.png", &snapshots_dir)
+            &format!("{}/{:020}.png", &snapshots_dir, n)
         ).unwrap();
     }
     let mut snapshot_counter = 0_f64;
