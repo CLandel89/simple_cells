@@ -13,6 +13,8 @@ To run this, open a shell, `cd` into the `simple_cells` directory and fire up th
 cargo run --release
 ```
 
+A proof of concept can be found here: [proof-of-concept](doc/proof-of-concept.md).
+
 Workaround for `/usr/bin/ld: cannot find -lOpenCL`:
 ```
 sudo ln -s /usr/lib/x86_64-linux-gnu/libOpenCL.so.1 /usr/local/lib/libOpenCL.so
