@@ -120,6 +120,24 @@ impl Table
         //store
         self.values[env as usize / 4] = d;
     }
+    /*
+    We'll bake the table into the OpenCL source code, for even better performance.
+    */
+    fn as_cl_arr (&self) -> String {
+        // string length of a byte: max. 6: "0xFF, "
+        // overhead: 2: "{...}"
+        let length = 6*self.values.len() + 2;
+        let mut result = String::with_capacity(length);
+        result.push_str("{");
+        for bi in 0 .. self.values.len()-1 {
+            let b = self.values[bi];
+            result.push_str(&*format!("0x{:X}, ", b));
+        }
+        let b = self.values[self.values.len()-1];
+        result.push_str(&*format!("0x{:X}", b)); //notice no ", " inside the quots
+        result.push_str("}");
+        result
+    }
 }
 
 pub struct Automata {
@@ -208,9 +226,13 @@ impl Automata
                 0, //properties
                 0 //queue_size
             ).unwrap();
+            let mut program_source = String::from("__constant uchar TABLE[] = ");
+            program_source += &table.as_cl_arr();
+            program_source.push_str(";\n\n");
+            program_source.push_str(&include_str!("kernels.cl"));
             let program = cl::program::Program::create_and_build_from_source(
                 &cl_context,
-                &include_str!("kernels.cl"),
+                &*program_source,
                 "" //options
             ).unwrap();
             clk_play = cl::kernel::Kernel::new(
@@ -248,8 +270,7 @@ impl Automata
             clk_play.set_arg(1, &(h as u32)).unwrap();
             // 2 (source) set in loop
             // 3 (target) set in loop
-            clk_play.set_arg(4, &clb_table.get()).unwrap();
-            clk_play.set_arg_local_buffer(5, 3*field.w8).unwrap();
+            clk_play.set_arg_local_buffer(4, 3*field.w8).unwrap();
         }
 
         // create new object
