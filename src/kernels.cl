@@ -1,8 +1,9 @@
 /*
 Looks up 2 bits from the table (-> Table in automata.rs).
 */
-inline uchar lookup (__constant uchar *table, ushort env) {
-    return (table[env/4] >> ((env%4)*2)) & 3;
+inline uchar lookup (ushort env) {
+    // TABLE is baked in in automata.rs
+    return (TABLE[env/4] >> ((env%4)*2)) & 3;
 }
 
 /*
@@ -13,8 +14,7 @@ In other words: New 8×1 slice from a 10×3 slice (with 42 bits ignored).
 inline uchar work_byte (
         ushort TL, ushort TM, ushort TR,
         ushort ML, ushort MM, ushort MR,
-        ushort BL, ushort BM, ushort BR,
-        __constant uchar *table
+        ushort BL, ushort BM, ushort BR
 )
 {
     uchar result = 0;
@@ -22,16 +22,16 @@ inline uchar work_byte (
         ((TL>>7)<<0) | ((TM&7)<<1) |
         ((ML>>7)<<4) | ((MM&7)<<5) |
         ((BL>>7)<<8) | ((BM&7)<<9) ;
-    result |= lookup(table, env_0) << 0;
+    result |= lookup(env_0) << 0;
     ushort env_2 = ((TM>>1)&15) | (((MM>>1)&15)<<4) | (((BM>>1)&15)<<8);
-    result |= lookup(table, env_2) << 2;
+    result |= lookup(env_2) << 2;
     ushort env_4 = ((TM>>3)&15) | (((MM>>3)&15)<<4) | (((BM>>3)&15)<<8);
-    result |= lookup(table, env_4) << 4;
+    result |= lookup(env_4) << 4;
     ushort env_6 =
         ((TM>>5)<<0) | ((TR&1)<<3) |
         ((MM>>5)<<4) | ((MR&1)<<7) |
         ((BM>>5)<<8) | ((BR&1)<<11) ;
-    result |= lookup(table, env_6) << 6;
+    result |= lookup(env_6) << 6;
     return result;
 }
 
@@ -43,7 +43,6 @@ __kernel void play (
         uint h,
         __global uchar *source,
         __global uchar *target,
-        __constant uchar *table,
         __local uchar *source_buf
 )
 {
@@ -86,16 +85,14 @@ __kernel void play (
     sm(0, work_byte(
         0, gt(0), gt(1),
         0, gm(0), gm(1),
-        0, gb(0), gb(1),
-        table
+        0, gb(0), gb(1)
     ));
     // mid
     for (size_t x8=1; x8<w8-1; x8++) {
         sm(x8, work_byte(
             gt(x8-1), gt(x8), gt(x8+1),
             gm(x8-1), gm(x8), gm(x8+1),
-            gb(x8-1), gb(x8), gb(x8+1),
-            table
+            gb(x8-1), gb(x8), gb(x8+1)
         ));
     }
     // right edge
@@ -104,8 +101,7 @@ __kernel void play (
         work_byte(
             gt(w8-2), gt(w8-1), 0,
             gm(w8-2), gm(w8-1), 0,
-            gb(w8-2), gb(w8-1), 0,
-            table
+            gb(w8-2), gb(w8-1), 0
         ) & ~cutoff
     );
     #undef gt
