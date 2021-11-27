@@ -50,10 +50,14 @@ impl Field
 The "table" is the storage for all 2×1 results of 4×3 field slices.
 There are 2^(4×­3)=4096 2-bit lookup values. A u8 can hold 4 such values.
 TODO: Document how and why.
+It also stores a whole result byte for the case in which an 8×1 field slice
+is filled and surrounded with zeroes, or, respectively, ones.
 */
 
 pub struct Table {
     values: [u8; 4096/4],
+    zeroes_b: u8,
+    ones_b: u8,
 }
 
 impl Table
@@ -62,6 +66,8 @@ impl Table
     {
         let mut new = Self {
             values: [0; 4096/4],
+            zeroes_b: 0,
+            ones_b: 0,
         };
         for env in 0..4096 {
             let mut value = 0u8;
@@ -99,6 +105,20 @@ impl Table
             }
             //0 to 2 bits are set in "value", now store
             new.set(env, value);
+        }
+        //do 8 dead cells surrounding a dead cell spawn a live cell?
+        if (borns >> 8) & 1 != 0 {
+            new.zeroes_b = 0xff;
+        }
+        else {
+            new.zeroes_b = 0x00;
+        }
+        //do 8 live cells surrounding a live cell kill that cell?
+        if (survives >> 8) & 1 == 0 {
+            new.ones_b = 0x00;
+        }
+        else {
+            new.ones_b = 0xff;
         }
         new
     }
@@ -226,9 +246,13 @@ impl Automata
                 0, //properties
                 0 //queue_size
             ).unwrap();
+            //bake in lookup values
             let mut program_source = String::from("__constant uchar TABLE[] = ");
             program_source += &table.as_cl_arr();
-            program_source.push_str(";\n\n");
+            program_source.push_str(";\n");
+            program_source.push_str(&*format!("#define ZEROES_B 0x{:X}\n", table.zeroes_b));
+            program_source.push_str(&*format!("#define ONES_B 0x{:X}\n", table.ones_b));
+            program_source.push_str("\n\n");
             program_source.push_str(&include_str!("kernels.cl"));
             let program = cl::program::Program::create_and_build_from_source(
                 &cl_context,
