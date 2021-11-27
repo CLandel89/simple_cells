@@ -17,6 +17,22 @@ inline uchar work_byte (
         ushort BL, ushort BM, ushort BR
 )
 {
+    // Is this environment filled with zeroes or ones?
+    if (
+            ( ((TL>>7)&1) | TM | (TR&1) |
+            ((ML>>7)&1) | MM | (MR&1) |
+            ((BL>>7)&1) | BM | (BR&1)
+            ) == 0x00
+        )
+        return ZEROES_B;
+    if (
+            ( (((TL>>7)&1)|0xfe) & TM & ((TR&1)|0xfe) &
+            (((ML>>7)&1)|0xfe) & MM & ((MR&1)|0xfe) &
+            (((BL>>7)&1)|0xfe) & BM & ((BR&1)|0xfe)
+            ) == 0xff
+        )
+        return ONES_B;
+    // It's more complicated than that => work on the bits.
     uchar result = 0;
     ushort env_0 =
         ((TL>>7)<<0) | ((TM&7)<<1) |
