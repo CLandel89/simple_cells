@@ -106,8 +106,8 @@ impl Table
             //0 to 2 bits are set in "value", now store
             new.set(env, value);
         }
-        //do 8 dead cells surrounding a dead cell spawn a live cell?
-        if (borns >> 8) & 1 != 0 {
+        //do 8 dead cells (0 live cells) surrounding a dead cell spawn a live cell?
+        if (borns >> 0) & 1 != 0 {
             new.zeroes_b = 0xff;
         }
         else {
